@@ -1,42 +1,58 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getSTRs, sendApprovalEmail } from '../services/strService'
+import {
+  getSTRs, sendApprovalEmail, updateLocalStatus, syncNow, getToken,
+} from '../services/strService'
 
-export function useSTRs() {
+export function useSTRs(onSessionExpired) {
   const [strs, setSTRs] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
 
   const loadSTRs = useCallback(async () => {
+    if (!getToken()) {
+      setSTRs([])
+      setIsLoading(false)
+      return
+    }
+
     setIsLoading(true)
     setError('')
 
     try {
-      const data = await getSTRs()
-      setSTRs(data)
-    } catch {
-      setError('No fue posible cargar las STRs.')
+      setSTRs(await getSTRs())
+    } catch (caught) {
+      if (caught.message === 'SESSION_EXPIRED') {
+        setSTRs([])
+        onSessionExpired?.()
+      } else {
+        setError(caught.message || 'No fue posible cargar las solicitudes.')
+      }
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [onSessionExpired])
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => {
-      void loadSTRs()
-    }, 0)
-
-    return () => window.clearTimeout(initialLoad)
+    void loadSTRs()
   }, [loadSTRs])
 
-  const updateStatus = useCallback((id, estado) => {
-    setSTRs((current) =>
-      current.map((str) => (str.id === id ? { ...str, estado } : str)),
-    )
+  // Persiste el estado en la DB y refleja la respuesta del servidor.
+  const updateStatus = useCallback(async (id, estado) => {
+    const updated = await updateLocalStatus(id, estado)
+    setSTRs((current) => current.map((str) => (str.id === id ? updated : str)))
+    return updated
   }, [])
 
-  const requestApproval = useCallback(async (str, additionalInfo) => {
-    return sendApprovalEmail(str, additionalInfo)
-  }, [])
+  const requestApproval = useCallback(
+    async (str, additionalInfo) => sendApprovalEmail(str, additionalInfo),
+    [],
+  )
 
-  return { strs, isLoading, error, updateStatus, requestApproval, reload: loadSTRs }
+  const sync = useCallback(async () => {
+    const summary = await syncNow()
+    await loadSTRs()
+    return summary
+  }, [loadSTRs])
+
+  return { strs, isLoading, error, updateStatus, requestApproval, sync, reload: loadSTRs }
 }
