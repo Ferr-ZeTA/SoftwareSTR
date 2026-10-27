@@ -19,7 +19,8 @@
     "start": "start.bat",
     "audit": "node scripts/audit.js",
     "stop": "stop.bat",
-    "validate": "node scripts/validate.js"
+    "validate": "node scripts/validate.js",
+    "setup": "node scripts/seedUsers.js && node scripts/migrate.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -43,5 +44,8 @@
     "tailwindcss": "^4.3.3",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

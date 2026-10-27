@@ -47,3 +47,36 @@ Despues de eso, `start.bat` detecta el servicio y lo usa.
 | `npm run seed` | Crea los usuarios |
 | `npm test` | Tests del frontend |
 | `npm run verify` | Prueba la sincronización contra la API real |
+
+### Modo demo
+
+La aplicación inicia actualmente en modo demo, sin autenticación ni llamadas
+al API externo. Muestra cinco solicitudes quemadas, todas con estado
+**Pendiente**, y los cambios de estado solo viven en la memoria del navegador.
+Esto permite probar la interfaz sin configurar credenciales, MongoDB o correo.
+
+## Despliegue en Render
+
+Un solo servicio web sirve la API y el frontend compilado, así los enlaces
+del correo son absolutos y abren desde cualquier computadora.
+
+**Base de datos:** Render no ofrece MongoDB. Crea un cluster gratuito en
+MongoDB Atlas (https://www.mongodb.com/atlas), y en Network Access permite
+`0.0.0.0/0` para que Render pueda conectarse.
+
+**Pasos**
+
+1. Sube el repo a GitHub.
+2. En Render: New -> Blueprint, y apunta al repo. `render.yaml` define todo.
+3. Llena las variables marcadas como secretas: `MONGODB_URI`,
+   `EXTERNAL_API_KEY`, `BREVO_API_KEY`, `BREVO_EDUARDO_EMAIL`,
+   `BREVO_SENDER_EMAIL` y las tres `AUTH_*_PASSWORD`.
+4. Tras el primer deploy, en la pestaña Shell del servicio: `npm run setup`
+   (crea los usuarios y puebla desde la API).
+
+No configures `APPROVAL_PUBLIC_URL`: si falta, el servidor usa
+`RENDER_EXTERNAL_URL`, que Render inyecta con la URL pública real.
+
+En el plan gratuito el servicio se duerme tras 15 minutos sin tráfico, así
+que la sincronización cada 30 minutos solo corre mientras esté despierto.
+Al entrar a la página se despierta y sincroniza al arrancar.

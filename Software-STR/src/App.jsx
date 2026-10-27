@@ -304,6 +304,13 @@ function UsersModal({ currentUser, onClose, onToast }) {
 
 function App() {
   const [user, setUser] = useState(() => {
+    if (import.meta.env.VITE_DEMO_MODE !== 'false') return {
+      email: 'demo@strflow.local',
+      name: 'Usuario demo',
+      role: 'GERENTE_GENERAL',
+      country: null,
+    }
+
     try {
       // Una sesion guardada por una version anterior no trae JWT: sin token
       // la tabla quedaria vacia sin explicacion, asi que se exige re-login.
@@ -320,7 +327,7 @@ function App() {
     localStorage.removeItem('strflow-user')
     setUser(null)
   }, [])
-  const { strs, isLoading, error, requestApproval, reload } = useSTRs(handleSessionExpired)
+  const { strs, isLoading, error, requestApproval, reload, sync } = useSTRs(handleSessionExpired)
   const [selectedSTR, setSelectedSTR] = useState(null)
   const [detailSTR, setDetailSTR] = useState(null)
   const [showUsers, setShowUsers] = useState(false)
@@ -366,10 +373,6 @@ function App() {
     return matchesId && matchesCountry && matchesClient && matchesResponsible && (filter === 'Todas' || str.estado === filter)
   }), [visibleSTRs, search, filter, countryFilter, clientFilter, responsibleFilter])
 
-  useEffect(() => {
-    setPage(1)
-  }, [search, filter, countryFilter, clientFilter, responsibleFilter])
-
   const counts = useMemo(() => ({
     total: visibleSTRs.length,
     pending: visibleSTRs.filter((str) => str.estado === 'Pendiente').length,
@@ -385,6 +388,12 @@ function App() {
 
   const PAGE_SIZE = 10
   const [page, setPage] = useState(1)
+
+  // Al cambiar un filtro hay que volver al inicio: si no, se queda en una
+  // página que el nuevo listado ya no tiene.
+  useEffect(() => {
+    setPage(1)
+  }, [search, filter, countryFilter, clientFilter, responsibleFilter])
 
   const totalPages = Math.max(1, Math.ceil(filteredSTRs.length / PAGE_SIZE))
   // Si los filtros reducen el listado, no quedarse en una pagina que ya no existe.
@@ -435,10 +444,30 @@ function App() {
     }
   }
 
+  const [isSyncing, setIsSyncing] = useState(false)
+
+  // El gerente general dispara una consulta real a la API externa; los
+  // regionales no tienen ese permiso, así que solo releen la base.
   async function refreshSTRs() {
-    await reload()
-    setToast('Solicitudes actualizadas correctamente.')
-    window.setTimeout(() => setToast(''), 3500)
+    setIsSyncing(true)
+    try {
+      if (user.role === 'GERENTE_GENERAL') {
+        const summary = await sync()
+        const nuevos = summary.upserted
+          ? `${summary.upserted} traslado(s) nuevo(s) desde la API.`
+          : 'Sin traslados nuevos en la API.'
+        const ausentes = summary.missing ? ` ${summary.missing} dejaron de venir.` : ''
+        setToast(`${nuevos}${ausentes}`)
+      } else {
+        await reload()
+        setToast('Listado actualizado.')
+      }
+    } catch (caught) {
+      setToast(`No se pudo actualizar: ${caught.message}`)
+    } finally {
+      setIsSyncing(false)
+      window.setTimeout(() => setToast(''), 4500)
+    }
   }
 
   if (!user) return <LoginScreen onLogin={handleLogin} />
@@ -460,7 +489,7 @@ function App() {
       <main className="main-content" id="dashboard">
         <header className="topbar"><button className="icon-button sidebar-toggle" onClick={toggleSidebar} aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'} title={collapsed ? 'Expandir menú' : 'Contraer menú'}><Icon name="menu" size={19} /></button><div className="breadcrumb">Operaciones <span>/</span> <strong>Solicitudes STR</strong></div><div className="topbar-actions"><button className="icon-button notification" aria-label="Notificaciones"><Icon name="bell" size={19} /><i /></button></div></header>
         <div className="content">
-          <div className="page-heading"><div><span className="eyebrow">CENTRO DE CONTROL</span><h1>Solicitudes STR</h1><p>Gestiona y da seguimiento a las solicitudes de tus clientes.</p></div><button className="button button-primary" onClick={refreshSTRs} disabled={isLoading}><Icon name="refresh" size={16} /> {isLoading ? 'Actualizando...' : 'Actualizar'}</button></div>
+          <div className="page-heading"><div><span className="eyebrow">CENTRO DE CONTROL</span><h1>Solicitudes STR</h1><p>Gestiona y da seguimiento a las solicitudes de tus clientes.</p></div><button className="button button-primary" onClick={refreshSTRs} disabled={isLoading || isSyncing}><Icon name="refresh" size={16} /> {isSyncing ? 'Consultando la API...' : isLoading ? 'Cargando...' : 'Actualizar'}</button></div>
           <section className="stats-grid" aria-label="Resumen de solicitudes">
             <div className="stat-card"><div className="stat-top"><span>Total de solicitudes</span><div className="stat-icon blue"><Icon name="file" size={18} /></div></div><strong>{counts.total}</strong><small><span className="neutral-dot" /> Todas las solicitudes</small></div>
             <div className="stat-card"><div className="stat-top"><span>Pendientes de aprobación</span><div className="stat-icon amber"><Icon name="clock" size={18} /></div></div><strong>{counts.pending}</strong><small><span className="amber-dot" /> Requieren tu atención</small></div>

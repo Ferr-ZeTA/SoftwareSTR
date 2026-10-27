@@ -121,15 +121,30 @@ async function main() {
     body: JSON.stringify({ email, password }),
   })
 
-  const general = await login('gerentegeneral@red.com', 'General2026str')
+  // Las contraseñas salen del .env, nunca escritas en el código: este
+  // archivo vive en un repo público.
+  const CUENTAS = {
+    general: [process.env.AUTH_GLOBAL_EMAIL || 'gerentegeneral@red.com', process.env.AUTH_GLOBAL_PASSWORD],
+    gt: ['gerenteguatemala@red.com', process.env.AUTH_GUATEMALA_PASSWORD],
+    sv: ['gerenteelsalvador@red.com', process.env.AUTH_ELSALVADOR_PASSWORD],
+  }
+  for (const [rol, [correo, clave]] of Object.entries(CUENTAS)) {
+    if (!clave) {
+      console.error(`
+Falta la contraseña de ${rol} (${correo}) en el .env.`)
+      process.exit(1)
+    }
+  }
+
+  const general = await login(...CUENTAS.general)
   check('Login gerente general', general.status === 200 && !!general.body.token,
     general.body.user?.role)
-  const gt = await login('gerenteguatemala@red.com', 'Guate2026str')
+  const gt = await login(...CUENTAS.gt)
   check('Login gerente GT', gt.status === 200, gt.body.user?.country)
-  const sv = await login('gerenteelsalvador@red.com', 'Salva2026str')
+  const sv = await login(...CUENTAS.sv)
   check('Login gerente SV', sv.status === 200, sv.body.user?.country)
 
-  const bad = await login('gerentegeneral@red.com', 'incorrecta')
+  const bad = await login(CUENTAS.general[0], 'contraseña-incorrecta')
   check('Contraseña incorrecta rechazada', bad.status === 401)
   const ghost = await login('noexiste@red.com', 'loquesea')
   check('Usuario inexistente rechazado', ghost.status === 401)

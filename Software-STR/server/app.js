@@ -1,4 +1,6 @@
 import express from 'express'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { authRouter } from './routes/auth.js'
 import { requestsRouter } from './routes/requests.js'
 import { usersRouter } from './routes/users.js'
@@ -22,6 +24,16 @@ export function createApp() {
   app.use('/api/auth', authRouter)
   app.use('/api/requests', requestsRouter)
   app.use('/api/users', usersRouter)
+
+  // En produccion el mismo servicio sirve el frontend compilado, asi que la
+  // app y la API comparten origen y los enlaces del correo son absolutos.
+  const dist = fileURLToPath(new URL('../dist', import.meta.url))
+  if (existsSync(dist)) {
+    app.use(express.static(dist, { maxAge: '1h', index: false }))
+    app.get(/^(?!\/api\/).*/, (request, response) => {
+      response.sendFile('index.html', { root: dist })
+    })
+  }
 
   app.use((request, response) => response.status(404).json({ error: 'Ruta no encontrada.' }))
 

@@ -2,11 +2,12 @@ import { Router } from 'express'
 import { Request, LOCAL_STATUS } from '../models/Request.js'
 import { ROLES } from '../models/User.js'
 import { authenticate, enforceScope, requireRole } from '../middleware/auth.js'
-import { issueApprovalToken, consumeApprovalToken } from '../services/approvalService.js'
+import { issueApprovalToken, consumeApprovalToken, revertDecision } from '../services/approvalService.js'
 import { sendApprovalEmail, escapeHtml } from '../services/mailer.js'
-import { syncExternalApi } from '../services/syncExternalApi.js'
+import { syncExternalApi, upsertRequest } from '../services/syncExternalApi.js'
 
 export const requestsRouter = Router()
+const demoMode = process.env.DEMO_MODE !== 'false'
 
 const LIST_PROJECTION = '-raw -approvalTokenHash'
 
@@ -22,6 +23,90 @@ function resultPage(ok, title, message) {
 </div></body></html>`
 }
 
+function revertPage({ documento, status, token, seconds }) {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Respuesta registrada</title>
+<style>
+ body{font-family:Arial,Helvetica,sans-serif;background:#f5f8fa;margin:0;color:#19283b}
+ .card{max-width:520px;margin:70px auto;background:#fff;padding:40px;border-radius:14px;
+   border:1px solid #e5ebef;text-align:center;box-shadow:0 10px 40px rgba(17,37,61,.08)}
+ .mark{width:64px;height:64px;margin:auto;border-radius:50%;display:grid;place-items:center;
+   font-size:32px;background:#e1f6f0;color:#168d77}
+ h1{margin:18px 0 8px;font-size:22px}
+ p{color:#526276;margin:6px 0;line-height:1.5}
+ .undo{margin-top:26px;padding:18px;border-radius:11px;background:#f8fafc;border:1px solid #e5ebef}
+ .undo strong{display:block;font-size:15px;margin-bottom:4px}
+ .count{font-size:30px;font-weight:bold;color:#11253d;margin:10px 0;font-variant-numeric:tabular-nums}
+ .bar{height:5px;background:#e5ebef;border-radius:99px;overflow:hidden;margin:12px 0 18px}
+ .bar i{display:block;height:100%;background:#0d9488;width:100%;
+   animation:drain ${seconds}s linear forwards}
+ @keyframes drain{to{width:0}}
+ .btns{display:flex;gap:10px;justify-content:center}
+ button,a.btn{font:inherit;font-size:14px;font-weight:bold;padding:12px 26px;border-radius:9px;
+   border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block}
+ .yes{background:#fcecef;color:#c0525e;border-color:#f6cdd5}
+ .yes:hover{background:#c0525e;color:#fff}
+ .no{background:#fff;color:#526276;border-color:#dde5ed}
+ .no:hover{background:#eef3f8}
+ .done{color:#9aa8b6;font-size:13px;margin-top:22px}
+</style></head><body>
+<div class="card">
+ <div class="mark">&#10003;</div>
+ <h1>Respuesta registrada</h1>
+ <p>El traslado <strong>${escapeHtml(documento)}</strong> quedó como <strong>${escapeHtml(status)}</strong>.</p>
+
+ <div class="undo" id="undo">
+  <strong>Tienes <span id="s">${seconds}</span> segundos para revertir la decisión.</strong>
+  <p>¿Deseas revertirla?</p>
+  <div class="bar"><i></i></div>
+  <div class="count" id="c">${seconds}</div>
+  <div class="btns">
+   <a class="btn yes" href="/api/requests/revert?token=${encodeURIComponent(token)}">Sí, revertir</a>
+   <button class="no" id="keep">No, dejarla así</button>
+  </div>
+ </div>
+ <p class="done" id="msg" style="display:none">Decisión confirmada. Puedes cerrar esta ventana.</p>
+</div>
+<script>
+ var left = ${seconds};
+ var c = document.getElementById('c'), s = document.getElementById('s');
+ var undo = document.getElementById('undo'), msg = document.getElementById('msg');
+ function finish(){ undo.style.display = 'none'; msg.style.display = 'block'; }
+ var timer = setInterval(function(){
+   left--; c.textContent = left; s.textContent = left;
+   if (left <= 0) { clearInterval(timer); finish(); }
+ }, 1000);
+ document.getElementById('keep').addEventListener('click', function(){
+   clearInterval(timer); finish();
+ });
+</script>
+</body></html>`
+}
+
+// --- PUBLICO: revertir la decision dentro de la ventana. ---
+requestsRouter.get('/revert', async (request, response) => {
+  response.type('html')
+  const result = await revertDecision(String(request.query.token || ''))
+
+  if (result.ok) {
+    return response.status(200).send(resultPage(
+      true,
+      'Decisión revertida',
+      `El traslado <strong>${escapeHtml(result.request.documento)}</strong> volvió a `
+      + `<strong>${escapeHtml(result.restoredTo)}</strong>.`,
+    ))
+  }
+
+  const messages = {
+    used: 'Esta reversión ya se usó una vez.',
+    expired: 'Se acabó el tiempo para revertir. La decisión quedó registrada.',
+    unknown: 'El enlace de reversión no es válido.',
+    invalid: 'El enlace de reversión está incompleto.',
+  }
+  return response.status(result.reason === 'expired' ? 410 : 400)
+    .send(resultPage(false, 'No se pudo revertir', messages[result.reason]))
+})
+
 // --- PUBLICO: aprobacion por correo. Debe declararse antes de /:externalId. ---
 requestsRouter.get('/approve', async (request, response) => {
   const { token, status } = request.query
@@ -29,11 +114,12 @@ requestsRouter.get('/approve', async (request, response) => {
 
   const result = await consumeApprovalToken(String(token || ''), String(status || ''))
   if (result.ok) {
-    return response.status(200).send(resultPage(
-      true,
-      'Respuesta registrada',
-      `El traslado <strong>${escapeHtml(result.request.documento)}</strong> quedo como <strong>${escapeHtml(result.request.localStatus)}</strong>.`,
-    ))
+    return response.status(200).send(revertPage({
+      documento: result.request.documento,
+      status: result.request.localStatus,
+      token: result.revertToken,
+      seconds: result.revertSeconds,
+    }))
   }
 
   const messages = {
@@ -44,6 +130,43 @@ requestsRouter.get('/approve', async (request, response) => {
   }
   return response.status(result.reason === 'used' ? 409 : 400)
     .send(resultPage(false, 'Enlace no valido', messages[result.reason]))
+})
+
+requestsRouter.post('/demo/send-approval', async (request, response) => {
+  if (!demoMode) return response.status(404).json({ error: 'Modo demo desactivado.' })
+
+  const demo = request.body?.request
+  if (!demo?.id || !['GT', 'SV'].includes(demo.pais)) {
+    return response.status(400).json({ error: 'La solicitud demo no es válida.' })
+  }
+
+  const saved = await upsertRequest([{
+    documento: demo.documento,
+    fecha: demo.fechaISO,
+    cliente: demo.clienteCodigo,
+    nombre: demo.cliente,
+    bodegaorigen: demo.bodegaOrigen,
+    bodegadestino: demo.bodegaDestino,
+    tiposolicitud: demo.tipoSolicitud,
+    modelo: demo.items?.[0]?.modelo,
+    descripcion: demo.items?.[0]?.descripcion,
+    cantidad: demo.items?.[0]?.cantidad,
+  }], demo.pais)
+  if (!saved) return response.status(400).json({ error: 'No se pudo preparar la solicitud demo.' })
+
+  const issued = await issueApprovalToken(saved.externalId, process.env.BREVO_EDUARDO_EMAIL)
+  if (!issued) return response.status(404).json({ error: 'Solicitud demo no encontrada.' })
+
+  try {
+    const sent = await sendApprovalEmail({
+      request: issued.request,
+      token: issued.token,
+      additionalInfo: request.body?.additionalInfo,
+    })
+    return response.json({ ...sent, expiresAt: issued.expiresAt })
+  } catch (error) {
+    return response.status(502).json({ error: error.message })
+  }
 })
 
 // --- A partir de aqui todo exige JWT y queda acotado por pais. ---

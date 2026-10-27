@@ -69,6 +69,11 @@ const localFields = {
   // decision local), se marca para que la divergencia sea visible.
   missingFromApi: { type: Boolean, default: false, index: true },
   missingSince: { type: Date, default: null },
+  // Ventana corta para deshacer la decision recien tomada desde el correo.
+  revertTokenHash: { type: String, default: null, index: true, sparse: true },
+  revertTokenExpiresAt: { type: Date, default: null },
+  revertTokenUsedAt: { type: Date, default: null },
+  revertToStatus: { type: String, default: null },
   lastSyncedAt: { type: Date, default: null },
 }
 
@@ -98,6 +103,10 @@ export const LOCAL_DEFAULTS = {
   approvalHistory: [],
   missingFromApi: false,
   missingSince: null,
+  revertTokenHash: null,
+  revertTokenExpiresAt: null,
+  revertTokenUsedAt: null,
+  revertToStatus: null,
 }
 
 export const Request = mongoose.model('Request', requestSchema)

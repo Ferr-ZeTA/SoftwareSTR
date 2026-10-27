@@ -15,7 +15,11 @@ function formatDate(value) {
 
 // El enlace lleva solo el token: nunca el externalId ni el _id de Mongo.
 function approvalEmail({ request, token, additionalInfo }) {
-  const base = process.env.APPROVAL_PUBLIC_URL || 'http://localhost:8787'
+  // En Render, RENDER_EXTERNAL_URL trae la URL publica del servicio, asi que
+  // los enlaces del correo funcionan desde cualquier equipo sin configurar nada.
+  const base = process.env.APPROVAL_PUBLIC_URL
+    || process.env.RENDER_EXTERNAL_URL
+    || 'http://localhost:8787'
   const link = (status) =>
     `${base}/api/requests/approve?token=${encodeURIComponent(token)}&status=${encodeURIComponent(status)}`
 

@@ -84,13 +84,22 @@ async function fetchCountry(country) {
   const response = await fetch(`${API_BASE}?var_pais=${encodeURIComponent(country)}`, {
     headers: { 'X-API-Key': apiKey, Accept: 'application/json' },
   })
+
+  const text = await response.text()
+
+  // La API responde 404 con cuerpo vacio cuando ese pais no tiene traslados.
+  // No es una falla: es un conjunto vacio.
+  if (response.status === 404 && text.trim() === '') return { rows: [], empty: true }
+
   if (!response.ok) {
-    throw new Error(`API externa ${country}: ${response.status} ${await response.text()}`)
+    throw new Error(`API externa ${country}: ${response.status} ${text}`)
   }
 
-  const payload = await response.json()
-  if (Array.isArray(payload)) return payload
-  return payload.data ?? payload.value ?? payload.result ?? []
+  const payload = JSON.parse(text)
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload.data ?? payload.value ?? payload.result ?? []
+  return { rows, empty: false }
 }
 
 // Construye el $set únicamente con campos externos -> lo local queda intacto.
@@ -114,6 +123,7 @@ export async function syncExternalApi({ countries = COUNTRIES, fetcher = fetchCo
     skippedByDate: 0,
     missing: 0,
     reappeared: 0,
+    emptyCountries: [],
     upserted: 0,
     modified: 0,
     matched: 0,
@@ -122,11 +132,20 @@ export async function syncExternalApi({ countries = COUNTRIES, fetcher = fetchCo
   const now = new Date()
 
   for (const country of countries) {
-    let rows
+    let result
     try {
-      rows = await fetcher(country)
+      result = await fetcher(country)
     } catch (error) {
       summary.errors.push({ country, message: error.message })
+      continue
+    }
+
+    // Un fetcher de prueba puede devolver el arreglo directo.
+    const rows = Array.isArray(result) ? result : result.rows
+    if (!Array.isArray(result) && result.empty) {
+      // Sin datos: no se marca nada como ausente, porque no se puede
+      // distinguir "este pais quedo vacio" de "el endpoint esta caido".
+      summary.emptyCountries.push(country)
       continue
     }
 
@@ -145,10 +164,10 @@ export async function syncExternalApi({ countries = COUNTRIES, fetcher = fetchCo
       },
     }))
 
-    const result = await Request.bulkWrite(operations, { ordered: false })
-    summary.upserted += result.upsertedCount ?? 0
-    summary.modified += result.modifiedCount ?? 0
-    summary.matched += result.matchedCount ?? 0
+    const bulkResult = await Request.bulkWrite(operations, { ordered: false })
+    summary.upserted += bulkResult.upsertedCount ?? 0
+    summary.modified += bulkResult.modifiedCount ?? 0
+    summary.matched += bulkResult.matchedCount ?? 0
 
     // Solo se llega aqui si el fetch de este pais funciono, asi que la
     // ausencia es real y no un fallo de red.
