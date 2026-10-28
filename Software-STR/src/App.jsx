@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { login, clearSession, getToken, getUsers, createUser, deleteUser, toggleUser } from './services/strService'
+import { login, clearSession, getToken, getUsers, createUser, deleteUser, toggleUser, isDemoMode } from './services/strService'
 import { useSTRs } from './hooks/useSTRs'
 import { useNotifications } from './hooks/useNotifications'
 import { isMuted, setMuted } from './services/notificationSound'
@@ -210,6 +210,7 @@ function UsersModal({ currentUser, onClose, onToast }) {
   })
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const demoMode = isDemoMode()
 
   const refresh = useCallback(async () => {
     try {
@@ -272,6 +273,13 @@ function UsersModal({ currentUser, onClose, onToast }) {
           <button className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button>
         </div>
 
+        {demoMode && (
+          <p className="demo-notice">
+            Modo demo: los cambios se guardan en este navegador y no crean cuentas reales.
+            Configura <code>DEMO_MODE=false</code> para administrar usuarios del sistema.
+          </p>
+        )}
+
         <form className="user-form" onSubmit={handleCreate}>
           <label>Nombre completo
             <input value={form.name} onChange={update('name')} placeholder="Ana Pérez" required />
@@ -316,7 +324,12 @@ function UsersModal({ currentUser, onClose, onToast }) {
                 {user.role === 'GERENTE_GENERAL' ? 'General' : 'Regional'}
               </span>
               <div className="row-actions">
-                <button className="row-action" onClick={() => handleToggle(user)}>
+                <button
+                  className="row-action"
+                  onClick={() => handleToggle(user)}
+                  disabled={user.email === currentUser.email}
+                  title={user.email === currentUser.email ? 'No puedes desactivar tu propia cuenta.' : undefined}
+                >
                   {user.active ? 'Desactivar' : 'Activar'}
                 </button>
                 {user.email !== currentUser.email && (
@@ -787,10 +800,8 @@ function App() {
         <nav className="side-nav" aria-label="Navegación principal">
           <span className="nav-label">GESTIÓN</span>
           <a className="nav-item active" href="#dashboard" data-label="Solicitudes STR"><span className="nav-icon"><Icon name="file" size={17} /></span><span className="nav-text">Solicitudes STR</span> <b>{counts.pending}</b></a>
-          <a className="nav-item" href="#clientes" data-label="Clientes"><span className="nav-icon"><Icon name="box" size={17} /></span><span className="nav-text">Clientes</span></a>
           <span className="nav-label nav-label-spaced">SISTEMA</span>
-          {user.role === 'GERENTE_GENERAL' && <a className="nav-item" href="#usuarios" data-label="Usuarios" onClick={(event) => { event.preventDefault(); setShowUsers(true) }}><span className="nav-icon"><Icon name="users" size={17} /></span><span className="nav-text">Usuarios</span></a>}
-          <a className="nav-item" href="#configuracion" data-label="Configuración"><span className="nav-icon"><Icon name="cog" size={17} /></span><span className="nav-text">Configuración</span></a>
+          {user.role === 'GERENTE_GENERAL' && <a className={`nav-item${showUsers ? ' active' : ''}`} href="#usuarios" data-label="Usuarios" onClick={(event) => { event.preventDefault(); setShowUsers(true) }}><span className="nav-icon"><Icon name="users" size={17} /></span><span className="nav-text">Usuarios</span></a>}
         </nav>
         <div className="sidebar-bottom"><div className="support-card"><span>¿Necesitas ayuda?</span><a href="#soporte">Visitar soporte <Icon name="arrow" size={13} /></a></div><div className="profile"><div className="avatar">GR</div><div><strong>{user.name}</strong><span>{user.role === 'GERENTE_GENERAL' ? 'Acceso global' : `Gerencia ${user.country}`}</span></div><button className="logout-button" onClick={logout}>Salir</button></div></div>
       </aside>

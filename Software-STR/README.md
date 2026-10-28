@@ -50,10 +50,15 @@ Despues de eso, `start.bat` detecta el servicio y lo usa.
 
 ### Modo demo
 
-La aplicación inicia actualmente en modo demo, sin autenticación ni llamadas
-al API externo. Muestra cinco solicitudes quemadas, todas con estado
-**Pendiente**, y los cambios de estado solo viven en la memoria del navegador.
-Esto permite probar la interfaz sin configurar credenciales, MongoDB o correo.
+La aplicación inicia en modo demo (`DEMO_MODE=true`), sin autenticación ni
+llamadas al API externo. Muestra cinco solicitudes de ejemplo. La gestión de
+usuarios también es de demostración: sus cambios se guardan solo en ese
+navegador y no crean cuentas reales.
+
+Para administrar usuarios reales, configurar las credenciales y MongoDB, correr
+`npm run setup` y establecer `DEMO_MODE=false` en `.env`. El acceso a `/api/users`
+requiere autenticación y el rol de gerente general; los gerentes regionales no
+pueden listar ni modificar usuarios.
 
 ## Despliegue en Render
 

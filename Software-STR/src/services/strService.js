@@ -1,9 +1,12 @@
 const TOKEN_KEY = 'strflow-token'
+const DEMO_USERS_KEY = 'strflow-demo-users'
 const DEMO_USER = {
+  _id: 'demo-global',
   email: 'demo@strflow.local',
   name: 'Usuario demo',
   role: 'GERENTE_GENERAL',
   country: null,
+  active: true,
 }
 
 const DEMO_REQUESTS = [
@@ -116,7 +119,7 @@ export function clearSession() {
 }
 
 export function isDemoMode() {
-  return true
+  return import.meta.env.VITE_DEMO_MODE !== 'false'
 }
 
 // Todas las llamadas protegidas pasan por aquí: adjuntan el JWT y detectan
@@ -323,20 +326,70 @@ export async function syncNow() {
 }
 
 // --- Gestión de usuarios (solo GERENTE_GENERAL) ---
+function getDemoUsers() {
+  const stored = localStorage.getItem(DEMO_USERS_KEY)
+  if (stored === null) return [{ ...DEMO_USER }]
+
+  const users = JSON.parse(stored)
+  if (!Array.isArray(users)) throw new Error('No se pudo leer la lista demo de usuarios.')
+  return users
+}
+
+function saveDemoUsers(users) {
+  localStorage.setItem(DEMO_USERS_KEY, JSON.stringify(users))
+}
+
 export async function getUsers() {
-  if (isDemoMode()) return [DEMO_USER]
+  if (isDemoMode()) return getDemoUsers()
 
   return (await authFetch('/api/users')).data
 }
 
 export async function createUser(payload) {
+  if (isDemoMode()) {
+    const users = getDemoUsers()
+    const email = String(payload.email || '').trim().toLowerCase()
+    if (users.some((user) => user.email.toLowerCase() === email)) {
+      throw new Error('Ya existe un usuario con ese correo.')
+    }
+
+    const user = {
+      _id: `demo-${crypto.randomUUID()}`,
+      name: String(payload.name || '').trim(),
+      email,
+      role: payload.role,
+      country: payload.role === 'GERENTE_REGIONAL' ? payload.country : null,
+      active: true,
+    }
+    users.unshift(user)
+    saveDemoUsers(users)
+    return user
+  }
+
   return authFetch('/api/users', { method: 'POST', body: JSON.stringify(payload) })
 }
 
 export async function deleteUser(id) {
+  if (isDemoMode()) {
+    const users = getDemoUsers()
+    const filtered = users.filter((user) => user._id !== id)
+    if (filtered.length === users.length) throw new Error('Usuario no encontrado.')
+    saveDemoUsers(filtered)
+    return { deleted: true }
+  }
+
   return authFetch(`/api/users/${id}`, { method: 'DELETE' })
 }
 
 export async function toggleUser(id, active) {
+  if (isDemoMode()) {
+    const users = getDemoUsers()
+    const user = users.find((entry) => entry._id === id)
+    if (!user) throw new Error('Usuario no encontrado.')
+    user.active = active
+    saveDemoUsers(users)
+    return user
+  }
+
   return authFetch(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ active }) })
 }

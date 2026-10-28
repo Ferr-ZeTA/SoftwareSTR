@@ -766,6 +766,13 @@ p { margin: 0; }
 
 .users-modal { width: min(760px, 100%); }
 
+.demo-notice {
+  margin-bottom: 14px; padding: 11px 13px;
+  border: 1px solid #f5d08a; border-radius: 9px;
+  background: #fffbeb; color: #854d0e; font-size: 12.5px; line-height: 1.5;
+}
+.demo-notice code { font-weight: 700; }
+
 .user-form {
   display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
   padding: 16px; background: #f8fafc;

@@ -38,6 +38,7 @@ vi.mock('./services/strService', () => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(),
   toggleUser: vi.fn(),
+  isDemoMode: () => true,
 }))
 
 const { default: App } = await import('./App.jsx')
@@ -103,5 +104,30 @@ describe('paginación de la tabla', () => {
     await user.type(screen.getByLabelText('Buscar por ID de solicitud'), '1023')
     expect(rowIds()).toHaveLength(1)
     expect(rowIds()[0]).toContain('GT-1023')
+  })
+
+  it('abre gestión de usuarios y oculta opciones sin implementar', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: 'Usuarios' }))
+
+    expect(await screen.findByRole('heading', { name: 'Usuarios del sistema' })).toBeTruthy()
+    expect(screen.getByText(/los cambios se guardan en este navegador/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Clientes' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Configuración' })).toBeNull()
+  })
+
+  it('permite crear usuarios desde la vista de administración', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: 'Usuarios' }))
+    await user.type(screen.getByPlaceholderText('Ana Pérez'), 'Ana Pérez')
+    await user.type(screen.getByPlaceholderText('ana@red.com'), 'ana@red.com')
+    await user.type(screen.getByPlaceholderText('Mínimo 8 caracteres'), 'password-seguro')
+    await user.click(screen.getByRole('button', { name: 'Crear usuario' }))
+
+    expect(await screen.findByText('Usuario ana@red.com creado correctamente.')).toBeTruthy()
   })
 })
