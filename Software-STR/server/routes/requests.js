@@ -1,15 +1,32 @@
 import { Router } from 'express'
-import { Request, LOCAL_STATUS } from '../models/Request.js'
+import { Request, LOCAL_STATUS, SAP_PUSH_STATUS } from '../models/Request.js'
 import { ROLES } from '../models/User.js'
 import { authenticate, enforceScope, requireRole } from '../middleware/auth.js'
-import { issueApprovalToken, consumeApprovalToken, revertDecision } from '../services/approvalService.js'
+import {
+  issueApprovalToken, consumeApprovalToken, peekApprovalToken, REVERT_WINDOW_SECONDS,
+} from '../services/approvalService.js'
 import { sendApprovalEmail, escapeHtml } from '../services/mailer.js'
-import { syncExternalApi, upsertRequest } from '../services/syncExternalApi.js'
+import { syncExternalApi } from '../services/syncExternalApi.js'
+import { authorizeInSap } from '../services/sapApproval.js'
+import {
+  issueDemoApprovalToken,
+  consumeDemoApprovalToken,
+  peekDemoApprovalToken,
+  listDemoDecisions,
+} from '../services/demoApprovals.js'
 
 export const requestsRouter = Router()
 const demoMode = process.env.DEMO_MODE !== 'false'
 
 const LIST_PROJECTION = '-raw -approvalTokenHash'
+
+// Motivos por los que un enlace del correo deja de servir.
+const LINK_ERRORS = {
+  used: 'Este enlace ya fue utilizado. Cada enlace sirve una sola vez.',
+  expired: 'Este enlace expiro. Solicita que se reenvie la aprobacion.',
+  unknown: 'El enlace de aprobacion no es valido.',
+  invalid: 'El enlace de aprobacion esta incompleto o la respuesta no es valida.',
+}
 
 function resultPage(ok, title, message) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
@@ -23,113 +40,269 @@ function resultPage(ok, title, message) {
 </div></body></html>`
 }
 
-function revertPage({ documento, status, token, seconds }) {
+// Pagina que abre el enlace del correo. Dos pasos en una sola carga:
+// 1. Resumen de lo que se va a decidir, con cuenta regresiva para arrepentirse.
+// 2. Cerrada la cuenta, el formulario de credenciales de SAP.
+// La decision no se registra hasta que se envia el formulario, asi que
+// abandonar la pagina no deja nada escrito.
+function approvalGatePage({ request, status, token, seconds, error, demo, valores = {} }) {
+  valores = { usuario: '', motivo: '', ...valores }
+  const aprueba = status === 'Aprobada'
+  const color = aprueba ? '#0d9488' : '#be123c'
+  const filas = (request.items || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.modelo)}</td>
+      <td>${escapeHtml(item.descripcion)}</td>
+      <td style="text-align:right">${item.cantidad}</td>
+    </tr>`).join('')
+
   return `<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Respuesta registrada</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${aprueba ? 'Aprobar' : 'Rechazar'} traslado ${escapeHtml(request.documento)}</title>
 <style>
- body{font-family:Arial,Helvetica,sans-serif;background:#f5f8fa;margin:0;color:#19283b}
- .card{max-width:520px;margin:70px auto;background:#fff;padding:40px;border-radius:14px;
-   border:1px solid #e5ebef;text-align:center;box-shadow:0 10px 40px rgba(17,37,61,.08)}
- .mark{width:64px;height:64px;margin:auto;border-radius:50%;display:grid;place-items:center;
-   font-size:32px;background:#e1f6f0;color:#168d77}
- h1{margin:18px 0 8px;font-size:22px}
- p{color:#526276;margin:6px 0;line-height:1.5}
- .undo{margin-top:26px;padding:18px;border-radius:11px;background:#f8fafc;border:1px solid #e5ebef}
- .undo strong{display:block;font-size:15px;margin-bottom:4px}
- .count{font-size:30px;font-weight:bold;color:#11253d;margin:10px 0;font-variant-numeric:tabular-nums}
- .bar{height:5px;background:#e5ebef;border-radius:99px;overflow:hidden;margin:12px 0 18px}
- .bar i{display:block;height:100%;background:#0d9488;width:100%;
+ *{box-sizing:border-box}
+ body{font-family:Arial,Helvetica,sans-serif;background:#f4f7fa;margin:0;color:#19283b;
+   padding:24px;display:flex;justify-content:center}
+ .card{width:100%;max-width:560px;background:#fff;border:1px solid #e4ebf2;border-radius:16px;
+   box-shadow:0 10px 40px rgba(17,37,61,.09);overflow:hidden}
+ .head{background:#11253d;color:#fff;padding:22px 28px}
+ .head .brand{font-size:17px;font-weight:bold}
+ .head .brand span{color:#54c9b8}
+ .head .sub{font-size:12px;color:#b6c5d4;margin-top:4px}
+ .body{padding:28px}
+ h1{font-size:20px;margin:0 0 6px}
+ .lead{color:#526276;font-size:14px;line-height:1.55;margin:0 0 20px}
+ .pill{display:inline-block;padding:5px 13px;border-radius:99px;font-size:12.5px;
+   font-weight:bold;color:#fff;background:${color}}
+ .meta{background:#f8fafc;border:1px solid #e4ebf2;border-radius:10px;padding:15px;margin:18px 0}
+ .meta p{margin:4px 0;font-size:13.5px}
+ table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+ th{text-align:left;color:#64748b;font-size:10.5px;text-transform:uppercase;
+   letter-spacing:.05em;padding:6px 8px;border-bottom:1px solid #e4ebf2}
+ td{padding:6px 8px;border-bottom:1px solid #eef3f8}
+ .count{text-align:center;padding:22px;border:1px dashed #cbd5e1;border-radius:12px;background:#f8fafc}
+ .count .num{font-size:38px;font-weight:bold;color:#11253d;font-variant-numeric:tabular-nums}
+ .count p{color:#526276;font-size:13.5px;margin:6px 0 0}
+ .bar{height:5px;background:#e4ebf2;border-radius:99px;overflow:hidden;margin-top:14px}
+ .bar i{display:block;height:100%;background:${color};width:100%;
    animation:drain ${seconds}s linear forwards}
  @keyframes drain{to{width:0}}
- .btns{display:flex;gap:10px;justify-content:center}
- button,a.btn{font:inherit;font-size:14px;font-weight:bold;padding:12px 26px;border-radius:9px;
-   border:1px solid transparent;cursor:pointer;text-decoration:none;display:inline-block}
- .yes{background:#fcecef;color:#c0525e;border-color:#f6cdd5}
- .yes:hover{background:#c0525e;color:#fff}
- .no{background:#fff;color:#526276;border-color:#dde5ed}
- .no:hover{background:#eef3f8}
- .done{color:#9aa8b6;font-size:13px;margin-top:22px}
-</style></head><body>
-<div class="card">
- <div class="mark">&#10003;</div>
- <h1>Respuesta registrada</h1>
- <p>El traslado <strong>${escapeHtml(documento)}</strong> quedó como <strong>${escapeHtml(status)}</strong>.</p>
-
- <div class="undo" id="undo">
-  <strong>Tienes <span id="s">${seconds}</span> segundos para revertir la decisión.</strong>
-  <p>¿Deseas revertirla?</p>
-  <div class="bar"><i></i></div>
-  <div class="count" id="c">${seconds}</div>
-  <div class="btns">
-   <a class="btn yes" href="/api/requests/revert?token=${encodeURIComponent(token)}">Sí, revertir</a>
-   <button class="no" id="keep">No, dejarla así</button>
-  </div>
+ label{display:block;font-size:12.5px;font-weight:bold;margin:14px 0 6px}
+ input{width:100%;padding:11px 13px;border:1px solid #cbd5e1;border-radius:9px;
+   font-size:14px;font-family:inherit}
+ input:focus{outline:2px solid ${color};outline-offset:1px;border-color:${color}}
+ .hint{font-size:12px;color:#64748b;margin-top:7px;line-height:1.5}
+ .row{display:flex;gap:10px;margin-top:22px}
+ button{flex:1;padding:13px;border-radius:9px;font-size:14px;font-weight:bold;
+   cursor:pointer;font-family:inherit;border:1px solid transparent}
+ .go{background:${color};color:#fff}
+ .cancel{background:#fff;border-color:#cbd5e1;color:#526276}
+ .err{background:#fdeaef;border:1px solid #f6c6d2;color:#be123c;padding:12px 14px;
+   border-radius:9px;font-size:13px;margin-bottom:16px}
+ .demo{background:#fef3e2;border:1px solid #f6ddb4;color:#b45309;padding:10px 13px;
+   border-radius:9px;font-size:12.5px;margin-bottom:16px}
+ .hidden{display:none}
+ .fieldset{border:1px solid #e4ebf2;border-radius:11px;padding:14px 16px 16px;margin-top:16px;position:relative}
+ .legend{position:absolute;top:-9px;left:12px;background:#fff;padding:0 7px;
+   font-size:10.5px;font-weight:bold;letter-spacing:.07em;text-transform:uppercase;color:#64748b}
+ .fieldset label:first-of-type{margin-top:4px}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+ input[readonly]{background:#f4f7fa;color:#526276;cursor:not-allowed}
+ textarea{width:100%;padding:11px 13px;border:1px solid #cbd5e1;border-radius:9px;
+   font-size:14px;font-family:inherit;resize:vertical}
+ textarea:focus{outline:2px solid ${color};outline-offset:1px;border-color:${color}}
+ label em{font-weight:normal;color:#94a3b8;font-style:normal}
+ @media(max-width:460px){.grid{grid-template-columns:1fr}}
+</style></head>
+<body><div class="card">
+ <div class="head">
+   <div class="brand">STR<span>flow</span></div>
+   <div class="sub">Confirmación de ${aprueba ? 'aprobación' : 'rechazo'}</div>
  </div>
- <p class="done" id="msg" style="display:none">Decisión confirmada. Puedes cerrar esta ventana.</p>
+ <div class="body">
+   ${demo ? '<div class="demo"><b>Modo demostración.</b> No se escribe nada en SAP: cualquier usuario y clave sirven para recorrer el flujo.</div>' : ''}
+   ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
+
+   <h1>Traslado ${escapeHtml(request.documento)}</h1>
+   <p class="lead">Estás por marcarlo como <span class="pill">${escapeHtml(status)}</span></p>
+
+   <div class="meta">
+     <p><strong>Cliente:</strong> ${escapeHtml(request.clienteNombre)} (${escapeHtml(request.clienteCodigo)})</p>
+     <p><strong>Ruta:</strong> ${escapeHtml(request.bodegaOrigen)} &rarr; ${escapeHtml(request.bodegaDestino)}</p>
+     <p><strong>País:</strong> ${escapeHtml(request.country)} · <strong>Tipo:</strong> ${escapeHtml(request.tipoSolicitud)}</p>
+     <table>
+       <thead><tr><th>Modelo</th><th>Descripción</th><th style="text-align:right">Cant.</th></tr></thead>
+       <tbody>${filas}</tbody>
+     </table>
+   </div>
+
+   <div id="espera" class="count${error ? ' hidden' : ''}">
+     <div class="num" id="num">${seconds}</div>
+     <p>Revisá el detalle. Si te equivocaste de botón, podés cancelar.</p>
+     <div class="bar"><i></i></div>
+     <div class="row"><button type="button" class="cancel" onclick="location.href='/api/requests/approve/cancel'">Cancelar</button></div>
+   </div>
+
+   <form id="form" class="${error ? '' : 'hidden'}" method="POST" action="/api/requests/approve/confirm" autocomplete="off">
+     <input type="hidden" name="token" value="${escapeHtml(token)}">
+     <input type="hidden" name="status" value="${escapeHtml(status)}">
+     <div class="fieldset">
+       <span class="legend">Documento</span>
+       <div class="grid">
+         <div>
+           <label for="documento">ID del documento</label>
+           <input id="documento" name="documento" value="${escapeHtml(request.documento)}" readonly>
+         </div>
+         <div>
+           <label for="pais">País</label>
+           <input id="pais" name="pais" value="${escapeHtml(request.country)}" readonly>
+         </div>
+         <div>
+           <label for="tipo">Tipo de documento</label>
+           <input id="tipo" name="tipo" value="${escapeHtml(request.tipoSolicitud)}" readonly>
+         </div>
+         <div>
+           <label for="decision">Decisión</label>
+           <input id="decision" value="${escapeHtml(status)}" readonly>
+         </div>
+       </div>
+       <p class="hint">Estos datos vienen del traslado y viajan tal cual a SAP. No se editan.</p>
+     </div>
+
+     <div class="fieldset">
+       <span class="legend">Credenciales del aprobador</span>
+       <label for="usuario">Usuario de SAP</label>
+       <input id="usuario" name="usuario" value="${escapeHtml(valores.usuario)}" required
+         autocomplete="off" autocapitalize="none" spellcheck="false">
+       <label for="clave">Clave de SAP</label>
+       <input id="clave" name="clave" type="password" required autocomplete="off">
+       <p class="hint">Deben ser las del usuario autorizado en SAP para este tipo de documento. La clave no se guarda en ningún lado: viaja solo para registrar esta autorización.</p>
+     </div>
+
+     <div class="fieldset">
+       <span class="legend">Motivo</span>
+       <label for="motivo">Razón de la decisión ${aprueba ? '<em>(opcional)</em>' : ''}</label>
+       <textarea id="motivo" name="motivo" rows="3" ${aprueba ? '' : 'required'}
+         placeholder="${aprueba ? 'Por ejemplo: stock confirmado con bodega.' : 'Explicá por qué no se aprueba.'}">${escapeHtml(valores.motivo)}</textarea>
+       <p class="hint">Queda guardado en el historial del traslado junto con tu usuario y la fecha.</p>
+     </div>
+     <div class="row">
+       <button type="button" class="cancel" onclick="location.href='/api/requests/approve/cancel'">Cancelar</button>
+       <button type="submit" class="go">Confirmar ${aprueba ? 'aprobación' : 'rechazo'}</button>
+     </div>
+   </form>
+ </div>
 </div>
 <script>
- var left = ${seconds};
- var c = document.getElementById('c'), s = document.getElementById('s');
- var undo = document.getElementById('undo'), msg = document.getElementById('msg');
- function finish(){ undo.style.display = 'none'; msg.style.display = 'block'; }
- var timer = setInterval(function(){
-   left--; c.textContent = left; s.textContent = left;
-   if (left <= 0) { clearInterval(timer); finish(); }
+ // La espera es para arrepentirse; el formulario aparece recien al terminar.
+ // En un reintento ya se espero una vez, asi que no se repite.
+ var reintento = ${error ? 'true' : 'false'};
+ var restante = ${seconds};
+ if (reintento) { document.getElementById('usuario').focus(); }
+ var num = document.getElementById('num');
+ var reloj = reintento ? null : setInterval(function () {
+   restante -= 1;
+   if (restante > 0) { num.textContent = restante; return; }
+   clearInterval(reloj);
+   document.getElementById('espera').classList.add('hidden');
+   document.getElementById('form').classList.remove('hidden');
+   document.getElementById('usuario').focus();
  }, 1000);
- document.getElementById('keep').addEventListener('click', function(){
-   clearInterval(timer); finish();
- });
 </script>
 </body></html>`
 }
 
-// --- PUBLICO: revertir la decision dentro de la ventana. ---
-requestsRouter.get('/revert', async (request, response) => {
-  response.type('html')
-  const result = await revertDecision(String(request.query.token || ''))
-
-  if (result.ok) {
-    return response.status(200).send(resultPage(
-      true,
-      'Decisión revertida',
-      `El traslado <strong>${escapeHtml(result.request.documento)}</strong> volvió a `
-      + `<strong>${escapeHtml(result.restoredTo)}</strong>.`,
-    ))
-  }
-
-  const messages = {
-    used: 'Esta reversión ya se usó una vez.',
-    expired: 'Se acabó el tiempo para revertir. La decisión quedó registrada.',
-    unknown: 'El enlace de reversión no es válido.',
-    invalid: 'El enlace de reversión está incompleto.',
-  }
-  return response.status(result.reason === 'expired' ? 410 : 400)
-    .send(resultPage(false, 'No se pudo revertir', messages[result.reason]))
-})
-
 // --- PUBLICO: aprobacion por correo. Debe declararse antes de /:externalId. ---
 requestsRouter.get('/approve', async (request, response) => {
-  const { token, status } = request.query
+  const token = String(request.query.token || '')
+  const status = String(request.query.status || '')
   response.type('html')
 
-  const result = await consumeApprovalToken(String(token || ''), String(status || ''))
-  if (result.ok) {
-    return response.status(200).send(revertPage({
-      documento: result.request.documento,
-      status: result.request.localStatus,
-      token: result.revertToken,
-      seconds: result.revertSeconds,
+  if (!Object.values(LOCAL_STATUS).includes(status)) {
+    return response.status(400).send(resultPage(false, 'Enlace no valido', LINK_ERRORS.invalid))
+  }
+
+  const result = peekDemoApprovalToken(token) ?? await peekApprovalToken(token)
+  if (!result?.ok) {
+    const reason = result?.reason || 'unknown'
+    return response.status(reason === 'used' ? 409 : 400)
+      .send(resultPage(false, 'Enlace no valido', LINK_ERRORS[reason]))
+  }
+
+  return response.send(approvalGatePage({
+    request: result.request,
+    status,
+    token,
+    seconds: REVERT_WINDOW_SECONDS,
+    demo: Boolean(peekDemoApprovalToken(token)),
+  }))
+})
+
+// Aqui si se registra la decision: primero en SAP, y solo si SAP la acepta se
+// gasta el token. Asi una credencial equivocada no quema el enlace.
+requestsRouter.post('/approve/confirm', async (request, response) => {
+  const { token = '', status = '', usuario = '', clave = '', motivo = '' } = request.body || {}
+  response.type('html')
+
+  if (!Object.values(LOCAL_STATUS).includes(status)) {
+    return response.status(400).send(resultPage(false, 'Enlace no valido', LINK_ERRORS.invalid))
+  }
+
+  const demo = Boolean(peekDemoApprovalToken(token))
+  const peeked = peekDemoApprovalToken(token) ?? await peekApprovalToken(token)
+  if (!peeked?.ok) {
+    const reason = peeked?.reason || 'unknown'
+    return response.status(reason === 'used' ? 409 : 400)
+      .send(resultPage(false, 'Enlace no valido', LINK_ERRORS[reason]))
+  }
+
+  const sap = await authorizeInSap({
+    request: peeked.request, status, sapUser: usuario, sapPassword: clave, motivo,
+  })
+
+  if (!sap.ok) {
+    // Se devuelve el formulario con el motivo. El token sigue sirviendo.
+    // Se devuelve lo ya escrito, menos la clave: reescribir todo por un typo
+    // en la contrasena es la forma mas rapida de que alguien abandone.
+    return response.status(sap.retryable ? 400 : 502).send(approvalGatePage({
+      request: peeked.request, status, token, seconds: REVERT_WINDOW_SECONDS, demo,
+      error: sap.message, valores: { usuario, motivo },
     }))
   }
 
-  const messages = {
-    used: 'Este enlace ya fue utilizado. Cada enlace sirve una sola vez.',
-    expired: 'Este enlace expiro. Solicita que se reenvie la aprobacion.',
-    unknown: 'El enlace de aprobacion no es valido.',
-    invalid: 'El enlace de aprobacion esta incompleto o la respuesta no es valida.',
+  const constancia = {
+    status: SAP_PUSH_STATUS.ENVIADO, code: sap.code, error: null, user: usuario, motivo,
   }
-  return response.status(result.reason === 'used' ? 409 : 400)
-    .send(resultPage(false, 'Enlace no valido', messages[result.reason]))
+  const result = demo
+    ? consumeDemoApprovalToken(token, status, constancia)
+    : await consumeApprovalToken(token, status, constancia)
+
+  if (!result?.ok) {
+    const reason = result?.reason || 'unknown'
+    return response.status(reason === 'used' ? 409 : 400)
+      .send(resultPage(false, 'Enlace no valido', LINK_ERRORS[reason]))
+  }
+
+  return response.send(resultPage(
+    true,
+    status === LOCAL_STATUS.APROBADA ? 'Traslado aprobado' : 'Traslado rechazado',
+    `El traslado <strong>${escapeHtml(result.request.documento)}</strong> quedo como `
+    + `<strong>${escapeHtml(status)}</strong>. ${escapeHtml(sap.message)}`,
+  ))
+})
+
+requestsRouter.get('/approve/cancel', (request, response) => {
+  response.type('html').send(resultPage(
+    true,
+    'No se registro nada',
+    'Cancelaste a tiempo: el traslado sigue pendiente. '
+    + 'Podes volver al correo y elegir de nuevo cuando quieras.',
+  ))
+})
+
+requestsRouter.get('/demo/decisions', (request, response) => {
+  if (!demoMode) return response.status(404).json({ error: 'Modo demo desactivado.' })
+  return response.json({ data: listDemoDecisions() })
 })
 
 requestsRouter.post('/demo/send-approval', async (request, response) => {
@@ -140,22 +313,8 @@ requestsRouter.post('/demo/send-approval', async (request, response) => {
     return response.status(400).json({ error: 'La solicitud demo no es válida.' })
   }
 
-  const saved = await upsertRequest([{
-    documento: demo.documento,
-    fecha: demo.fechaISO,
-    cliente: demo.clienteCodigo,
-    nombre: demo.cliente,
-    bodegaorigen: demo.bodegaOrigen,
-    bodegadestino: demo.bodegaDestino,
-    tiposolicitud: demo.tipoSolicitud,
-    modelo: demo.items?.[0]?.modelo,
-    descripcion: demo.items?.[0]?.descripcion,
-    cantidad: demo.items?.[0]?.cantidad,
-  }], demo.pais)
-  if (!saved) return response.status(400).json({ error: 'No se pudo preparar la solicitud demo.' })
-
-  const issued = await issueApprovalToken(saved.externalId, process.env.BREVO_EDUARDO_EMAIL)
-  if (!issued) return response.status(404).json({ error: 'Solicitud demo no encontrada.' })
+  // Nada de esto toca Mongo: el token y la solicitud quemada viven en memoria.
+  const issued = issueDemoApprovalToken(demo, process.env.BREVO_EDUARDO_EMAIL)
 
   try {
     const sent = await sendApprovalEmail({
@@ -289,6 +448,16 @@ requestsRouter.post('/:externalId/restore', async (request, response) => {
   ).select('externalId deletedLocally')
   if (!updated) return response.status(404).json({ error: 'Solicitud no encontrada.' })
   response.json(updated)
+})
+
+// Reintento manual de un envio a SAP que quedo en fallido, para cuando se
+// corrige la causa (credenciales, endpoint caido) sin esperar otra decision.
+requestsRouter.post('/:externalId/sap-retry', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
+  const summary = await retrySapPush(request.params.externalId)
+  if (!summary) {
+    return response.status(404).json({ error: 'No hay un envio fallido para esa solicitud.' })
+  }
+  return response.json(summary)
 })
 
 requestsRouter.post('/:externalId/send-approval', async (request, response) => {

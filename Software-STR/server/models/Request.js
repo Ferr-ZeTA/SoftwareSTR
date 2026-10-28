@@ -6,6 +6,14 @@ export const LOCAL_STATUS = {
   NO_APROBADA: 'No Aprobada',
 }
 
+// Estado del envio de la decision al endpoint de SAP.
+export const SAP_PUSH_STATUS = {
+  // Sin decidir todavia.
+  NO_APLICA: 'no_aplica',
+  ENVIADO: 'enviado',
+  FALLIDO: 'fallido',
+}
+
 // Una línea del traslado. Llega de la API; se reemplaza completa en cada sync.
 const itemSchema = new mongoose.Schema(
   {
@@ -69,12 +77,22 @@ const localFields = {
   // decision local), se marca para que la divergencia sea visible.
   missingFromApi: { type: Boolean, default: false, index: true },
   missingSince: { type: Date, default: null },
-  // Ventana corta para deshacer la decision recien tomada desde el correo.
-  revertTokenHash: { type: String, default: null, index: true, sparse: true },
-  revertTokenExpiresAt: { type: Date, default: null },
-  revertTokenUsedAt: { type: Date, default: null },
-  revertToStatus: { type: String, default: null },
   lastSyncedAt: { type: Date, default: null },
+  // --- Escritura de la decision en SAP ---
+  // Resultado de registrar la decision en SAP. La llamada es sincronica: pasa
+  // al enviar el formulario del correo, asi que esto es constancia de lo que
+  // respondio SAP, no una cola.
+  sapPushStatus: {
+    type: String,
+    enum: Object.values(SAP_PUSH_STATUS),
+    default: SAP_PUSH_STATUS.NO_APLICA,
+    index: true,
+  },
+  sapPushAt: { type: Date, default: null },
+  sapPushError: { type: String, default: null },
+  sapPushCode: { type: String, default: null },
+  // Usuario de SAP con el que se autorizo. La clave nunca se guarda.
+  sapAuthorizedBy: { type: String, default: null },
 }
 
 const requestSchema = new mongoose.Schema(
@@ -101,6 +119,11 @@ export const LOCAL_DEFAULTS = {
   approvalDecidedVia: null,
   approvalSentTo: null,
   approvalHistory: [],
+  sapPushStatus: SAP_PUSH_STATUS.NO_APLICA,
+  sapPushAt: null,
+  sapPushError: null,
+  sapPushCode: null,
+  sapAuthorizedBy: null,
   missingFromApi: false,
   missingSince: null,
   revertTokenHash: null,

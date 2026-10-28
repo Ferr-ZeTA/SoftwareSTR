@@ -9,6 +9,8 @@ export function createApp() {
   const app = express()
 
   app.use(express.json({ limit: '1mb' }))
+  // El formulario de aprobacion del correo se envia como formulario clasico.
+  app.use(express.urlencoded({ extended: false, limit: '32kb' }))
 
   app.use((request, response, next) => {
     response.set({

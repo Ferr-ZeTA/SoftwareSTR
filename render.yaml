@@ -2,11 +2,16 @@ services:
   - type: web
     name: strflow
     runtime: node
+    rootDir: Software-STR
     plan: free
     buildCommand: npm ci && npm run build
     startCommand: node server/index.js
     healthCheckPath: /api/health
     envVars:
+      - key: DEMO_MODE
+        value: "false"
+      - key: VITE_DEMO_MODE
+        value: "false"
       - key: NODE_VERSION
         value: "22"
       # --- Se configuran en el panel de Render (marcadas como secretas) ---

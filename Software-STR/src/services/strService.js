@@ -192,12 +192,51 @@ function adapt(request) {
     decididoVia: request.approvalDecidedVia ?? null,
     decididoEn: request.approvalDecidedAt ?? null,
     historial: request.approvalHistory ?? [],
+    // El motivo que escribio quien decidio, en el formulario del correo.
+    motivo: request.approvalHistory?.[request.approvalHistory.length - 1]?.note ?? '',
+    usuarioSap: request.sapAuthorizedBy ?? null,
+    estadoSap: request.sapPushCode ?? null,
   }
 }
 
 // Trae todas las páginas. El backend tope es 200 por request.
 export async function getSTRs() {
-  if (isDemoMode()) return demoRequests.map((request) => adapt(request))
+  if (isDemoMode()) {
+    // Las decisiones tomadas desde el correo viven en el servidor (en memoria),
+    // asi que hay que traerlas para que la tabla refleje lo que aprobo Eduardo.
+    try {
+      const response = await fetch('/api/requests/demo/decisions')
+      if (response.ok) {
+        const { data = [] } = await response.json()
+        const byId = new Map(data.map((decision) => [decision.externalId, decision]))
+        demoRequests = demoRequests.map((request) => {
+          const decision = byId.get(request.externalId)
+          if (!decision) return request
+          return {
+            ...request,
+            localStatus: decision.localStatus,
+            approvalDecidedBy: decision.decidedBy,
+            approvalDecidedVia: 'correo',
+            approvalDecidedAt: decision.decidedAt,
+            sapAuthorizedBy: decision.sapUser,
+            sapPushCode: decision.sapCode,
+            approvalHistory: decision.motivo
+              ? [{
+                  status: decision.localStatus,
+                  previousStatus: 'Pendiente',
+                  by: decision.decidedBy,
+                  via: 'correo',
+                  at: decision.decidedAt,
+                  note: decision.motivo,
+                }]
+              : [],
+          }
+        })
+      }
+    } catch { /* sin API: la demo sigue con lo que tiene en memoria */ }
+
+    return demoRequests.map((request) => adapt(request))
+  }
 
   const all = []
   let page = 1
@@ -230,7 +269,7 @@ export async function login(email, password) {
 
 export async function sendApprovalEmail(str, additionalInfo) {
   if (isDemoMode()) {
-    const response = await fetch('/api/demo/send-approval', {
+    const response = await fetch('/api/requests/demo/send-approval', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request: str, additionalInfo }),

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { login, clearSession, getToken, getUsers, createUser, deleteUser, toggleUser } from './services/strService'
 import { useSTRs } from './hooks/useSTRs'
+import { useNotifications } from './hooks/useNotifications'
+import { isMuted, setMuted } from './services/notificationSound'
 import './App.css'
 
 const statusStyles = {
@@ -26,6 +28,8 @@ function Icon({ name, size = 18 }) {
     users: <><circle cx="9" cy="8" r="3.4" /><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" /><path d="M17 5.3a3.4 3.4 0 0 1 0 5.4M18.5 14.8c2 .7 3 2.4 3 5.2" /></>,
     box: <><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z" /><path d="M3 7.5 12 12l9-4.5M12 12v9" /></>,
     menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
+    soundOn: <><path d="M11 5 6.5 9H3v6h3.5L11 19z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" /></>,
+    soundOff: <><path d="M11 5 6.5 9H3v6h3.5L11 19z" /><path d="m16 9.5 5 5M21 9.5l-5 5" /></>,
     cog: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" /></>,
   }
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
@@ -76,36 +80,67 @@ function LoginScreen({ onLogin }) {
 
 function ApprovalModal({ str, onClose, onSend, error }) {
   const [additionalInfo, setAdditionalInfo] = useState('')
+  // idle -> sending -> sent. El estado 'sent' se queda visible un momento para
+  // que la animacion de exito se alcance a leer antes de cerrar el modal.
+  const [phase, setPhase] = useState('idle')
 
-  function handleSend(event) {
+  async function handleSend(event) {
     event.preventDefault()
-    onSend(additionalInfo)
+    if (phase !== 'idle') return
+
+    setPhase('sending')
+    const ok = await onSend(additionalInfo)
+    setPhase(ok ? 'sent' : 'idle')
   }
 
+  const isBusy = phase !== 'idle'
+
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <div className="modal-header">
-          <div>
-            <span className="eyebrow">Flujo de aprobación</span>
-            <h2 id="modal-title">Llevar a aprobación</h2>
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !isBusy && onClose()}>
+      <section className={`modal${phase === 'sent' ? ' is-sent' : ''}`} role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        {phase === 'sent' ? (
+          <div className="send-success" role="status" aria-live="assertive">
+            <svg className="success-mark" viewBox="0 0 52 52" aria-hidden="true">
+              <circle className="success-ring" cx="26" cy="26" r="24" />
+              <path className="success-tick" d="M15 27l7.5 7.5L38 19" />
+            </svg>
+            <h2>El correo se ha enviado con éxito</h2>
+            <p>La solicitud <strong>{str.id}</strong> quedó en manos de Eduardo. Te avisamos aquí mismo en cuanto responda.</p>
+            <div className="success-steps">
+              <span className="done"><Icon name="check" size={12} /> Correo entregado</span>
+              <span className="waiting"><Icon name="clock" size={12} /> Esperando respuesta</span>
+            </div>
+            <button type="button" className="button button-primary" onClick={onClose}>Entendido</button>
           </div>
-          <button className="icon-button" onClick={onClose} aria-label="Cerrar modal"><Icon name="close" /></button>
-        </div>
-        <div className="modal-str-card">
-          <div className="file-icon"><Icon name="file" size={20} /></div>
-          <div><strong>{str.id}</strong><span>{str.cliente} · {str.detalleSTR}</span></div>
-        </div>
-        <form onSubmit={handleSend}>
-          <label htmlFor="additional-info">Información adicional <span>(opcional)</span></label>
-          <textarea id="additional-info" value={additionalInfo} onChange={(event) => setAdditionalInfo(event.target.value)} placeholder="Escribe o pega aquí la información que Eduardo necesita para revisar esta solicitud..." />
-          <p className="helper-text">Se enviará un correo real a <strong>Eduardo</strong> con el detalle completo y botones para aprobar o rechazar.</p>
-          {error && <p className="modal-error" role="alert">{error}</p>}
-          <div className="modal-actions">
-            <button type="button" className="button button-secondary" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="button button-primary">Enviar a gerente <Icon name="arrow" size={16} /></button>
-          </div>
-        </form>
+        ) : (
+          <>
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Flujo de aprobación</span>
+                <h2 id="modal-title">Llevar a aprobación</h2>
+              </div>
+              <button className="icon-button" onClick={onClose} aria-label="Cerrar modal" disabled={isBusy}><Icon name="close" /></button>
+            </div>
+            <div className="modal-str-card">
+              <div className="file-icon"><Icon name="file" size={20} /></div>
+              <div><strong>{str.id}</strong><span>{str.cliente} · {str.detalleSTR}</span></div>
+            </div>
+            <form onSubmit={handleSend}>
+              <label htmlFor="additional-info">Información adicional <span>(opcional)</span></label>
+              <textarea id="additional-info" value={additionalInfo} onChange={(event) => setAdditionalInfo(event.target.value)} disabled={isBusy} placeholder="Escribe o pega aquí la información que Eduardo necesita para revisar esta solicitud..." />
+              <p className="helper-text">Se enviará un correo real a <strong>Eduardo</strong> con el detalle completo y botones para aprobar o rechazar.</p>
+              {error && <p className="modal-error" role="alert">{error}</p>}
+              <div className="modal-actions">
+                <button type="button" className="button button-secondary" onClick={onClose} disabled={isBusy}>Cancelar</button>
+                <button type="submit" className={`button button-primary${phase === 'sending' ? ' is-loading' : ''}`} disabled={isBusy}>
+                  {phase === 'sending'
+                    ? <><span className="spinner" aria-hidden="true" /> Enviando correo...</>
+                    : <>Enviar a gerente <Icon name="arrow" size={16} /></>}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
       </section>
     </div>
   )
@@ -302,6 +337,232 @@ function UsersModal({ currentUser, onClose, onToast }) {
   )
 }
 
+function fechaLarga(value) {
+  if (!value) return 'Sin fecha'
+  return new Date(value).toLocaleString('es-GT', {
+    day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+// El porque de una decision: quien, cuando, con que usuario de SAP y el motivo
+// que escribio. Solo tiene sentido para solicitudes ya decididas.
+function ApprovalDetailsModal({ str, onClose }) {
+  const aprobada = str.estado === 'Aprobada'
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="modal approval-detail" role="dialog" aria-modal="true" aria-labelledby="aprobacion-title">
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">Detalle de aprobación</span>
+            <h2 id="aprobacion-title">{str.id}</h2>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button>
+        </div>
+
+        <div className={`decision-banner${aprobada ? '' : ' is-rejected'}`}>
+          <span className="decision-icon"><Icon name={aprobada ? 'check' : 'x'} size={22} /></span>
+          <div>
+            <strong>{str.estado}</strong>
+            <span>{fechaLarga(str.decididoEn)}</span>
+          </div>
+        </div>
+
+        <dl className="decision-facts">
+          <div><dt>Decidido por</dt><dd>{str.decididoPor || 'Sin registrar'}</dd></div>
+          <div><dt>Vía</dt><dd>{str.decididoVia || 'Sin registrar'}</dd></div>
+          <div><dt>Usuario de SAP</dt><dd>{str.usuarioSap || 'Sin registrar'}</dd></div>
+          <div><dt>Registro en SAP</dt><dd>{SAP_LABEL[str.estadoSap] ?? 'Sin registrar'}</dd></div>
+        </dl>
+
+        <div className="decision-reason">
+          <span className="eyebrow">Motivo</span>
+          {str.motivo
+            ? <blockquote>{str.motivo}</blockquote>
+            : <p className="decision-empty">No se escribió un motivo para esta decisión.</p>}
+        </div>
+
+        {str.historial?.length > 1 && (
+          <div className="decision-history">
+            <span className="eyebrow">Historial</span>
+            <ul>
+              {str.historial.map((item, index) => (
+                <li key={`${item.at}-${index}`}>
+                  <strong>{item.previousStatus} → {item.status}</strong>
+                  <span>{fechaLarga(item.at)}{item.by ? ` · ${item.by}` : ''}</span>
+                  {item.note && <p>{item.note}</p>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" className="button button-primary" onClick={onClose}>Cerrar</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+// Lo que respondio SAP, en palabras.
+const SAP_LABEL = {
+  ok: 'Registrado en SAP',
+  ya_autorizado: 'SAP ya lo tenía registrado',
+  simulado: 'Simulado (SAP no conectado)',
+}
+
+const NOTIFICATION_ICON = {
+  success: 'check', priority: 'bell', error: 'x', info: 'bell',
+}
+
+// Una decision sobre un traslado es lo mas importante que pasa en la app, asi
+// que no se queda en una esquina: toma la pantalla y exige un acuse.
+function PriorityAlert({ notification, onClose, onVerDetalle }) {
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  const approved = notification.outcome !== 'No Aprobada'
+
+  return (
+    <div className="priority-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section
+        className={`priority-alert${approved ? '' : ' is-rejected'}`}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="priority-title"
+      >
+        <button className="priority-close" onClick={onClose} aria-label="Cerrar aviso"><Icon name="close" size={17} /></button>
+
+        <div className="priority-mark">
+          <span className="priority-pulse" aria-hidden="true" />
+          <span className="priority-pulse delayed" aria-hidden="true" />
+          <span className="priority-icon"><Icon name={approved ? 'check' : 'x'} size={34} /></span>
+        </div>
+
+        <span className="priority-eyebrow">Respuesta de aprobación</span>
+        <h2 id="priority-title">{notification.title}</h2>
+        <p className="priority-message">{notification.message}</p>
+        {notification.detail && <span className="priority-detail">{notification.detail}</span>}
+
+        {notification.decidedBy && (
+          <p className="priority-by">Decidido por <strong>{notification.decidedBy}</strong></p>
+        )}
+
+        {notification.motivo && (
+          <blockquote className="priority-motivo">
+            <span>Motivo</span>
+            {notification.motivo}
+          </blockquote>
+        )}
+
+        <div className="priority-actions">
+          {onVerDetalle && (
+            <button className="button button-secondary" onClick={onVerDetalle}>Ver detalle</button>
+          )}
+          <button className="button button-primary" onClick={onClose}>Entendido</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function NotificationCenter({ notifications, onDismiss }) {
+  return (
+    <div className="notification-stack" role="region" aria-label="Avisos en pantalla" aria-live="polite">
+      {notifications.filter((item) => item.variant !== 'priority').map((item) => (
+        <article
+          key={item.id}
+          className={`notification notification-${item.variant}`}
+          role={item.variant === 'error' ? 'alert' : 'status'}
+        >
+          <span className="notification-icon"><Icon name={NOTIFICATION_ICON[item.variant] ?? 'bell'} size={16} /></span>
+          <div className="notification-body">
+            {item.title && <strong>{item.title}</strong>}
+            {item.message && <p>{item.message}</p>}
+            {item.detail && <span className="notification-detail">{item.detail}</span>}
+          </div>
+          <button className="notification-close" onClick={() => onDismiss(item.id)} aria-label="Descartar notificación">
+            <Icon name="close" size={13} />
+          </button>
+          <span className="notification-progress" />
+        </article>
+      ))}
+    </div>
+  )
+}
+
+// "hace 2 min" se lee mejor que una hora exacta para algo que acaba de pasar.
+function relativeTime(timestamp) {
+  const seconds = Math.round((Date.now() - timestamp) / 1000)
+  if (seconds < 10) return 'ahora mismo'
+  if (seconds < 60) return `hace ${seconds} s`
+
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `hace ${minutes} min`
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `hace ${hours} h`
+
+  return new Date(timestamp).toLocaleDateString('es-GT', { day: '2-digit', month: 'short' })
+}
+
+function NotificationHistory({ history, unread, onMarkAllRead, onClear, onClose }) {
+  // Cerrar con Escape y con un clic afuera: el panel no debe atrapar al usuario.
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  return (
+    <>
+      <div className="history-overlay" role="presentation" onMouseDown={onClose} />
+      <section className="history-panel" role="dialog" aria-label="Historial de notificaciones">
+        <header className="history-head">
+          <div>
+            <strong>Notificaciones</strong>
+            <span>{unread ? `${unread} sin leer` : 'Todo al día'}</span>
+          </div>
+          <div className="history-head-actions">
+            {unread > 0 && <button onClick={onMarkAllRead}>Marcar leídas</button>}
+            {history.length > 0 && <button onClick={onClear}>Limpiar</button>}
+          </div>
+        </header>
+
+        {history.length === 0 ? (
+          <div className="history-empty">
+            <span className="history-empty-icon"><Icon name="bell" size={20} /></span>
+            <strong>Sin notificaciones</strong>
+            <p>Cuando se envíe un correo o Eduardo responda una solicitud, lo verás aquí.</p>
+          </div>
+        ) : (
+          <ul className="history-list">
+            {history.map((item) => (
+              <li key={item.id} className={`history-item history-${item.variant}${item.read ? '' : ' is-unread'}`}>
+                <span className="history-icon"><Icon name={NOTIFICATION_ICON[item.variant] ?? 'bell'} size={14} /></span>
+                <div className="history-body">
+                  {item.title && <strong>{item.title}</strong>}
+                  {item.message && <p>{item.message}</p>}
+                  {item.detail && <span className="history-detail">{item.detail}</span>}
+                </div>
+                <time dateTime={new Date(item.at).toISOString()}>{relativeTime(item.at)}</time>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  )
+}
+
 function App() {
   const [user, setUser] = useState(() => {
     if (import.meta.env.VITE_DEMO_MODE !== 'false') return {
@@ -327,9 +588,51 @@ function App() {
     localStorage.removeItem('strflow-user')
     setUser(null)
   }, [])
-  const { strs, isLoading, error, requestApproval, reload, sync } = useSTRs(handleSessionExpired)
+  const {
+    notifications, history, unread, notify, dismiss, markAllRead, clearHistory,
+  } = useNotifications()
+  const [showHistory, setShowHistory] = useState(false)
+  // Solo una a la vez: si llegan dos decisiones juntas, se atienden en orden.
+  const priorityAlert = notifications.find((item) => item.variant === 'priority')
+  const [muted, setMutedState] = useState(() => isMuted())
+
+  // Abrir el panel es haber visto los avisos, asi que se marcan como leidos.
+  function toggleHistory() {
+    setShowHistory((current) => {
+      if (!current) markAllRead()
+      return !current
+    })
+  }
+
+  function toggleSound() {
+    setMutedState((current) => {
+      setMuted(!current)
+      return !current
+    })
+  }
+
+  // Lo que se decide desde el correo entra por aqui: es la novedad que el
+  // usuario no provoco, asi que va como aviso prioritario y con sonido.
+  const handleStatusChange = useCallback((str, previousStatus) => {
+    const approved = str.estado === 'Aprobada'
+    notify({
+      variant: 'priority',
+      sound: approved ? 'success' : 'error',
+      title: approved ? 'Solicitud aprobada' : 'Solicitud no aprobada',
+      message: `${str.id} · ${str.cliente}`,
+      detail: `${previousStatus} → ${str.estado}`,
+      decidedBy: str.decididoPor,
+      motivo: str.motivo,
+      outcome: str.estado,
+      // Para poder abrir el detalle completo desde el aviso.
+      strId: str.id,
+    })
+  }, [notify])
+
+  const { strs, isLoading, error, requestApproval, reload, sync } = useSTRs(handleSessionExpired, handleStatusChange)
   const [selectedSTR, setSelectedSTR] = useState(null)
   const [detailSTR, setDetailSTR] = useState(null)
+  const [approvalSTR, setApprovalSTR] = useState(null)
   const [showUsers, setShowUsers] = useState(false)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('strflow-sidebar') === 'collapsed' } catch { return false }
@@ -347,7 +650,6 @@ function App() {
   const [countryFilter, setCountryFilter] = useState('Todos')
   const [clientFilter, setClientFilter] = useState('Todos')
   const [responsibleFilter, setResponsibleFilter] = useState('Todos')
-  const [toast, setToast] = useState('')
   const [sendError, setSendError] = useState('')
 
   async function handleLogin(email, password) {
@@ -432,15 +734,22 @@ function App() {
     setSendError('')
   }
 
+  // Devuelve true/false: el modal usa el resultado para pasar a su pantalla
+  // de exito en vez de cerrarse de golpe.
   async function sendEmail(additionalInfo) {
     try {
       setSendError('')
       await requestApproval(selectedSTR, additionalInfo)
-      setToast(`Correo enviado para ${selectedSTR.id}.`)
-      setSelectedSTR(null)
-      window.setTimeout(() => setToast(''), 3500)
+      notify({
+        variant: 'success',
+        title: 'Correo enviado',
+        message: `${selectedSTR.id} salió a aprobación.`,
+      })
+      return true
     } catch (requestError) {
       setSendError(requestError.message)
+      notify({ variant: 'error', title: 'No se pudo enviar', message: requestError.message })
+      return false
     }
   }
 
@@ -457,16 +766,15 @@ function App() {
           ? `${summary.upserted} traslado(s) nuevo(s) desde la API.`
           : 'Sin traslados nuevos en la API.'
         const ausentes = summary.missing ? ` ${summary.missing} dejaron de venir.` : ''
-        setToast(`${nuevos}${ausentes}`)
+        notify({ variant: 'success', title: 'Sincronización lista', message: `${nuevos}${ausentes}` })
       } else {
         await reload()
-        setToast('Listado actualizado.')
+        notify({ variant: 'success', title: 'Listado actualizado', message: 'Ya estás viendo la última versión.' })
       }
     } catch (caught) {
-      setToast(`No se pudo actualizar: ${caught.message}`)
+      notify({ variant: 'error', title: 'No se pudo actualizar', message: caught.message })
     } finally {
       setIsSyncing(false)
-      window.setTimeout(() => setToast(''), 4500)
     }
   }
 
@@ -487,7 +795,31 @@ function App() {
         <div className="sidebar-bottom"><div className="support-card"><span>¿Necesitas ayuda?</span><a href="#soporte">Visitar soporte <Icon name="arrow" size={13} /></a></div><div className="profile"><div className="avatar">GR</div><div><strong>{user.name}</strong><span>{user.role === 'GERENTE_GENERAL' ? 'Acceso global' : `Gerencia ${user.country}`}</span></div><button className="logout-button" onClick={logout}>Salir</button></div></div>
       </aside>
       <main className="main-content" id="dashboard">
-        <header className="topbar"><button className="icon-button sidebar-toggle" onClick={toggleSidebar} aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'} title={collapsed ? 'Expandir menú' : 'Contraer menú'}><Icon name="menu" size={19} /></button><div className="breadcrumb">Operaciones <span>/</span> <strong>Solicitudes STR</strong></div><div className="topbar-actions"><button className="icon-button notification" aria-label="Notificaciones"><Icon name="bell" size={19} /><i /></button></div></header>
+        <header className="topbar"><button className="icon-button sidebar-toggle" onClick={toggleSidebar} aria-label={collapsed ? 'Expandir menú' : 'Contraer menú'} title={collapsed ? 'Expandir menú' : 'Contraer menú'}><Icon name="menu" size={19} /></button><div className="breadcrumb">Operaciones <span>/</span> <strong>Solicitudes STR</strong></div><div className="topbar-actions">
+            <button className="icon-button" onClick={toggleSound} aria-label={muted ? 'Activar sonido de notificaciones' : 'Silenciar notificaciones'} title={muted ? 'Sonido desactivado' : 'Sonido activado'}>
+              <Icon name={muted ? 'soundOff' : 'soundOn'} size={19} />
+            </button>
+            <div className="bell-wrap">
+              <button
+                className={`icon-button bell-button${unread ? ' has-unread' : ''}${showHistory ? ' is-open' : ''}`}
+                onClick={toggleHistory}
+                aria-label={unread ? `${unread} notificaciones sin leer` : 'Notificaciones'}
+                aria-expanded={showHistory}
+              >
+                <Icon name="bell" size={19} />
+                {unread > 0 && <span className="unread-count">{unread > 9 ? '9+' : unread}</span>}
+              </button>
+              {showHistory && (
+                <NotificationHistory
+                  history={history}
+                  unread={unread}
+                  onMarkAllRead={markAllRead}
+                  onClear={clearHistory}
+                  onClose={() => setShowHistory(false)}
+                />
+              )}
+            </div>
+          </div></header>
         <div className="content">
           <div className="page-heading"><div><span className="eyebrow">CENTRO DE CONTROL</span><h1>Solicitudes STR</h1><p>Gestiona y da seguimiento a las solicitudes de tus clientes.</p></div><button className="button button-primary" onClick={refreshSTRs} disabled={isLoading || isSyncing}><Icon name="refresh" size={16} /> {isSyncing ? 'Consultando la API...' : isLoading ? 'Cargando...' : 'Actualizar'}</button></div>
           <section className="stats-grid" aria-label="Resumen de solicitudes">
@@ -537,7 +869,47 @@ function App() {
             </div>
             <div className="table-wrap">
               <table><thead><tr><th>Solicitud STR</th><th>Cliente</th><th>Detalle de la solicitud</th><th>Estado</th><th>Fecha</th><th><span className="sr-only">Acción</span></th></tr></thead>
-                <tbody>{isLoading ? <tr><td colSpan="6" className="empty-state">Cargando solicitudes...</td></tr> : error ? <tr><td colSpan="6" className="empty-state error-text">{error}</td></tr> : filteredSTRs.length === 0 ? <tr><td colSpan="6" className="empty-state">No hay solicitudes que coincidan con tu búsqueda.</td></tr> : pageSTRs.map((str) => <tr key={str.id}><td><strong className="str-id">{str.id}</strong><span className="responsible">{str.ruta}</span></td><td><div className="client-cell"><span className="client-avatar">{str.clienteIniciales}</span>{str.cliente}</div></td><td className="detail-cell">{str.detalleSTR}</td><td><StatusBadge status={str.estado} /></td><td className="date-cell">{str.fecha}</td><td><div className="row-actions"><button className="row-action details-action" onClick={() => setDetailSTR(str)}><Icon name="eye" size={14} /> Ver detalles</button><button className="row-action" onClick={() => openApproval(str)}>Aprobación <Icon name="arrow" size={14} /></button></div></td></tr>)}</tbody>
+                <tbody>{isLoading ? <tr><td colSpan="6" className="empty-state">Cargando solicitudes...</td></tr> : error ? <tr><td colSpan="6" className="empty-state error-text">{error}</td></tr> : filteredSTRs.length === 0 ? <tr><td colSpan="6" className="empty-state">No hay solicitudes que coincidan con tu búsqueda.</td></tr> : pageSTRs.map((str) => (
+                  // data-label alimenta las etiquetas del modo tarjeta: en
+                  // pantallas angostas la tabla deja de ser tabla.
+                  <tr key={str.id}>
+                    <td data-label="Solicitud">
+                      <strong className="str-id">{str.id}</strong>
+                      <span className="responsible">{str.ruta}</span>
+                    </td>
+                    <td data-label="Cliente">
+                      <div className="client-cell">
+                        <span className="client-avatar">{str.clienteIniciales}</span>
+                        <span className="client-name">{str.cliente}</span>
+                      </div>
+                    </td>
+                    <td className="detail-cell" data-label="Detalle">{str.detalleSTR}</td>
+                    <td data-label="Estado"><StatusBadge status={str.estado} /></td>
+                    <td className="date-cell" data-label="Fecha">{str.fecha}</td>
+                    <td className="actions-cell">
+                      <div className="row-actions">
+                        <button
+                          className="row-action details-action icon-only"
+                          onClick={() => setDetailSTR(str)}
+                          aria-label={`Ver detalles de ${str.id}`}
+                          title="Ver detalles"
+                        >
+                          <Icon name="eye" size={15} />
+                        </button>
+                        {str.estado !== 'Pendiente' && (
+                          <button className="row-action decision-action" onClick={() => setApprovalSTR(str)}>
+                            <Icon name="file" size={14} /> Ver decisión
+                          </button>
+                        )}
+                        {str.estado !== 'Aprobada' && (
+                          <button className="row-action" onClick={() => openApproval(str)}>
+                            Aprobación <Icon name="arrow" size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}</tbody>
               </table>
             </div>
             <div className="table-footer">
@@ -568,8 +940,20 @@ function App() {
       </main>
       {selectedSTR && <ApprovalModal str={selectedSTR} error={sendError} onClose={() => setSelectedSTR(null)} onSend={sendEmail} />}
       {detailSTR && <InvoiceDetailsModal str={detailSTR} onClose={() => setDetailSTR(null)} />}
-      {showUsers && <UsersModal currentUser={user} onClose={() => setShowUsers(false)} onToast={(message) => { setToast(message); window.setTimeout(() => setToast(''), 3500) }} />}
-      {toast && <div className="toast"><span className="toast-check"><Icon name="check" size={15} /></span>{toast}</div>}
+      {approvalSTR && <ApprovalDetailsModal str={approvalSTR} onClose={() => setApprovalSTR(null)} />}
+      {showUsers && <UsersModal currentUser={user} onClose={() => setShowUsers(false)} onToast={(message) => notify({ variant: 'success', message })} />}
+      <NotificationCenter notifications={notifications} onDismiss={dismiss} />
+      {priorityAlert && (
+        <PriorityAlert
+          notification={priorityAlert}
+          onClose={() => dismiss(priorityAlert.id)}
+          onVerDetalle={() => {
+            const str = strs.find((item) => item.id === priorityAlert.strId)
+            if (str) setApprovalSTR(str)
+            dismiss(priorityAlert.id)
+          }}
+        />
+      )}
     </div>
   )
 }
