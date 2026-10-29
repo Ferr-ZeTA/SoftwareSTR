@@ -5,8 +5,9 @@ import { LOCAL_STATUS } from '../models/Request.js'
 // lo construye Camilo. Todo el contrato con el vive en este archivo, asi que
 // cuando lo entregue solo se toca `callSapEndpoint`.
 //
-// Las credenciales las escribe quien aprueba, en el formulario del correo:
-// pasan de ahi al endpoint y no se guardan ni se registran en ningun lado.
+// El formulario público no recopila credenciales. Mientras no exista un
+// método de autenticación configurado del lado del servidor, SAP debe seguir
+// deshabilitado.
 const ENDPOINT = process.env.SAP_APPROVAL_URL || ''
 const ENABLED = process.env.SAP_APPROVAL_ENABLED === 'true'
 
@@ -67,16 +68,21 @@ async function callSapEndpoint({ request, status, sapUser, sapPassword, motivo }
 // Registra la decision en SAP. Sin endpoint configurado corre en seco, para
 // poder recorrer y revisar el flujo completo antes de tener el contrato.
 export async function authorizeInSap({ request, status, sapUser, sapPassword, motivo = '' }) {
-  if (!sapUser || !sapPassword) {
-    return { ok: false, code: 'faltan_datos', retryable: true, message: 'Escribí tu usuario y tu clave de SAP.' }
-  }
-
   if (!ENABLED || !ENDPOINT) {
     return {
       ok: true,
       code: 'simulado',
       message: `Simulación: se enviaría ${decisionToSap(status)} para el documento `
-        + `${request.documento} (${request.country}) como ${sapUser}.`,
+        + `${request.documento} (${request.country}).`,
+    }
+  }
+
+  if (!sapUser || !sapPassword) {
+    return {
+      ok: false,
+      code: 'auth_no_config',
+      retryable: true,
+      message: 'SAP está habilitado, pero falta configurar la autenticación del lado del servidor.',
     }
   }
 

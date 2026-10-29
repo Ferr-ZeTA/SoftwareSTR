@@ -40,13 +40,9 @@ function resultPage(ok, title, message) {
 </div></body></html>`
 }
 
-// Pagina que abre el enlace del correo. Dos pasos en una sola carga:
-// 1. Resumen de lo que se va a decidir, con cuenta regresiva para arrepentirse.
-// 2. Cerrada la cuenta, el formulario de credenciales de SAP.
-// La decision no se registra hasta que se envia el formulario, asi que
-// abandonar la pagina no deja nada escrito.
-function approvalGatePage({ request, status, token, seconds, error, demo, valores = {} }) {
-  valores = { usuario: '', motivo: '', ...valores }
+// Pagina que abre el enlace del correo: muestra la solicitud, permite
+// cancelar durante la cuenta regresiva y luego pide solo la justificacion.
+function approvalGatePage({ request, status, token, seconds, error, demo, motivo = '' }) {
   const aprueba = status === 'Aprobada'
   const color = aprueba ? '#0d9488' : '#be123c'
   const filas = (request.items || []).map((item) => `
@@ -102,17 +98,10 @@ function approvalGatePage({ request, status, token, seconds, error, demo, valore
  .demo{background:#fef3e2;border:1px solid #f6ddb4;color:#b45309;padding:10px 13px;
    border-radius:9px;font-size:12.5px;margin-bottom:16px}
  .hidden{display:none}
- .fieldset{border:1px solid #e4ebf2;border-radius:11px;padding:14px 16px 16px;margin-top:16px;position:relative}
- .legend{position:absolute;top:-9px;left:12px;background:#fff;padding:0 7px;
-   font-size:10.5px;font-weight:bold;letter-spacing:.07em;text-transform:uppercase;color:#64748b}
- .fieldset label:first-of-type{margin-top:4px}
- .grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
- input[readonly]{background:#f4f7fa;color:#526276;cursor:not-allowed}
  textarea{width:100%;padding:11px 13px;border:1px solid #cbd5e1;border-radius:9px;
    font-size:14px;font-family:inherit;resize:vertical}
  textarea:focus{outline:2px solid ${color};outline-offset:1px;border-color:${color}}
  label em{font-weight:normal;color:#94a3b8;font-style:normal}
- @media(max-width:460px){.grid{grid-template-columns:1fr}}
 </style></head>
 <body><div class="card">
  <div class="head">
@@ -120,7 +109,7 @@ function approvalGatePage({ request, status, token, seconds, error, demo, valore
    <div class="sub">Confirmación de ${aprueba ? 'aprobación' : 'rechazo'}</div>
  </div>
  <div class="body">
-   ${demo ? '<div class="demo"><b>Modo demostración.</b> No se escribe nada en SAP: cualquier usuario y clave sirven para recorrer el flujo.</div>' : ''}
+   ${demo ? '<div class="demo"><b>Modo demostración.</b> La decisión se guarda solo en memoria y no se escribe en SAP.</div>' : ''}
    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
 
    <h1>Traslado ${escapeHtml(request.documento)}</h1>
@@ -146,46 +135,10 @@ function approvalGatePage({ request, status, token, seconds, error, demo, valore
    <form id="form" class="${error ? '' : 'hidden'}" method="POST" action="/api/requests/approve/confirm" autocomplete="off">
      <input type="hidden" name="token" value="${escapeHtml(token)}">
      <input type="hidden" name="status" value="${escapeHtml(status)}">
-     <div class="fieldset">
-       <span class="legend">Documento</span>
-       <div class="grid">
-         <div>
-           <label for="documento">ID del documento</label>
-           <input id="documento" name="documento" value="${escapeHtml(request.documento)}" readonly>
-         </div>
-         <div>
-           <label for="pais">País</label>
-           <input id="pais" name="pais" value="${escapeHtml(request.country)}" readonly>
-         </div>
-         <div>
-           <label for="tipo">Tipo de documento</label>
-           <input id="tipo" name="tipo" value="${escapeHtml(request.tipoSolicitud)}" readonly>
-         </div>
-         <div>
-           <label for="decision">Decisión</label>
-           <input id="decision" value="${escapeHtml(status)}" readonly>
-         </div>
-       </div>
-       <p class="hint">Estos datos vienen del traslado y viajan tal cual a SAP. No se editan.</p>
-     </div>
-
-     <div class="fieldset">
-       <span class="legend">Credenciales del aprobador</span>
-       <label for="usuario">Usuario de SAP</label>
-       <input id="usuario" name="usuario" value="${escapeHtml(valores.usuario)}" required
-         autocomplete="off" autocapitalize="none" spellcheck="false">
-       <label for="clave">Clave de SAP</label>
-       <input id="clave" name="clave" type="password" required autocomplete="off">
-       <p class="hint">Deben ser las del usuario autorizado en SAP para este tipo de documento. La clave no se guarda en ningún lado: viaja solo para registrar esta autorización.</p>
-     </div>
-
-     <div class="fieldset">
-       <span class="legend">Motivo</span>
-       <label for="motivo">Razón de la decisión ${aprueba ? '<em>(opcional)</em>' : ''}</label>
-       <textarea id="motivo" name="motivo" rows="3" ${aprueba ? '' : 'required'}
-         placeholder="${aprueba ? 'Por ejemplo: stock confirmado con bodega.' : 'Explicá por qué no se aprueba.'}">${escapeHtml(valores.motivo)}</textarea>
-       <p class="hint">Queda guardado en el historial del traslado junto con tu usuario y la fecha.</p>
-     </div>
+     <label for="motivo">Justificación ${aprueba ? '<em>(opcional)</em>' : ''}</label>
+     <textarea id="motivo" name="motivo" rows="4" ${aprueba ? '' : 'required'}
+       placeholder="${aprueba ? 'Por ejemplo: stock confirmado con bodega.' : 'Explicá por qué no se aprueba.'}">${escapeHtml(motivo)}</textarea>
+     <p class="hint">Quedará guardada en el historial del traslado junto con la fecha.</p>
      <div class="row">
        <button type="button" class="cancel" onclick="location.href='/api/requests/approve/cancel'">Cancelar</button>
        <button type="submit" class="go">Confirmar ${aprueba ? 'aprobación' : 'rechazo'}</button>
@@ -198,7 +151,7 @@ function approvalGatePage({ request, status, token, seconds, error, demo, valore
  // En un reintento ya se espero una vez, asi que no se repite.
  var reintento = ${error ? 'true' : 'false'};
  var restante = ${seconds};
- if (reintento) { document.getElementById('usuario').focus(); }
+ if (reintento) { document.getElementById('motivo').focus(); }
  var num = document.getElementById('num');
  var reloj = reintento ? null : setInterval(function () {
    restante -= 1;
@@ -206,7 +159,7 @@ function approvalGatePage({ request, status, token, seconds, error, demo, valore
    clearInterval(reloj);
    document.getElementById('espera').classList.add('hidden');
    document.getElementById('form').classList.remove('hidden');
-   document.getElementById('usuario').focus();
+   document.getElementById('motivo').focus();
  }, 1000);
 </script>
 </body></html>`
@@ -239,9 +192,9 @@ requestsRouter.get('/approve', async (request, response) => {
 })
 
 // Aqui si se registra la decision: primero en SAP, y solo si SAP la acepta se
-// gasta el token. Asi una credencial equivocada no quema el enlace.
+// gasta el token. Si SAP no esta configurado, la decision queda simulada.
 requestsRouter.post('/approve/confirm', async (request, response) => {
-  const { token = '', status = '', usuario = '', clave = '', motivo = '' } = request.body || {}
+  const { token = '', status = '', motivo = '' } = request.body || {}
   response.type('html')
 
   if (!Object.values(LOCAL_STATUS).includes(status)) {
@@ -257,21 +210,19 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
   }
 
   const sap = await authorizeInSap({
-    request: peeked.request, status, sapUser: usuario, sapPassword: clave, motivo,
+    request: peeked.request, status, motivo,
   })
 
   if (!sap.ok) {
-    // Se devuelve el formulario con el motivo. El token sigue sirviendo.
-    // Se devuelve lo ya escrito, menos la clave: reescribir todo por un typo
-    // en la contrasena es la forma mas rapida de que alguien abandone.
+    // Se devuelve el formulario con la justificacion. El token sigue sirviendo.
     return response.status(sap.retryable ? 400 : 502).send(approvalGatePage({
       request: peeked.request, status, token, seconds: REVERT_WINDOW_SECONDS, demo,
-      error: sap.message, valores: { usuario, motivo },
+      error: sap.message, motivo,
     }))
   }
 
   const constancia = {
-    status: SAP_PUSH_STATUS.ENVIADO, code: sap.code, error: null, user: usuario, motivo,
+    status: SAP_PUSH_STATUS.ENVIADO, code: sap.code, error: null, user: null, motivo,
   }
   const result = demo
     ? consumeDemoApprovalToken(token, status, constancia)

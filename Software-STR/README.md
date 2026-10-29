@@ -60,6 +60,15 @@ Para administrar usuarios reales, configurar las credenciales y MongoDB, correr
 requiere autenticación y el rol de gerente general; los gerentes regionales no
 pueden listar ni modificar usuarios.
 
+### Aprobación por correo
+
+El enlace de aprobación muestra el traslado y solicita únicamente la
+justificación (opcional al aprobar y obligatoria al rechazar). Con
+`SAP_APPROVAL_ENABLED=false`, la decisión se guarda en MongoDB y el registro de
+SAP queda como simulado. No habilites SAP hasta configurar su endpoint y un
+método de autenticación del lado del servidor; el formulario público no pide
+ni envía usuario o contraseña.
+
 ## Despliegue en Render
 
 Un solo servicio web sirve la API y el frontend compilado, así los enlaces
