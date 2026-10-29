@@ -5,7 +5,9 @@ import { authenticate, enforceScope, requireRole } from '../middleware/auth.js'
 import {
   issueApprovalToken, consumeApprovalToken, peekApprovalToken, REVERT_WINDOW_SECONDS,
 } from '../services/approvalService.js'
-import { sendApprovalEmail, escapeHtml } from '../services/mailer.js'
+import {
+  sendApprovalEmail, getBrevoConfigError, escapeHtml,
+} from '../services/mailer.js'
 import { syncExternalApi } from '../services/syncExternalApi.js'
 import { authorizeInSap } from '../services/sapApproval.js'
 
@@ -370,6 +372,12 @@ requestsRouter.post('/:externalId/sap-retry', requireRole(ROLES.GERENTE_GENERAL)
 })
 
 requestsRouter.post('/:externalId/send-approval', async (request, response) => {
+  const configError = getBrevoConfigError()
+  if (configError) {
+    console.error(`[approval-email] ${configError}`)
+    return response.status(503).json({ error: configError })
+  }
+
   const target = await Request.findOne({
     externalId: request.params.externalId,
     deletedLocally: false,

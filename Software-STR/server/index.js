@@ -3,9 +3,15 @@ import { createApp } from './app.js'
 import { connectDB } from './db.js'
 import { provisionConfiguredUsers } from './services/provisionUsers.js'
 import { syncExternalApi } from './services/syncExternalApi.js'
+import { getBrevoConfigStatus } from './services/mailer.js'
 
 const port = Number(process.env.PORT || 8787)
 const syncMinutes = Number(process.env.SYNC_INTERVAL_MINUTES || 0)
+
+const brevoConfig = Object.entries(getBrevoConfigStatus())
+  .map(([name, configured]) => `${name}=${configured ? 'presente' : 'FALTA'}`)
+  .join(', ')
+console.info(`[mailer] Variables requeridas: ${brevoConfig}`)
 
 await connectDB()
 console.log('MongoDB conectado')

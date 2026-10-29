@@ -439,7 +439,7 @@ continua, se necesita un plan que no suspenda el servicio.
 | Login devuelve `401` | Que el correo y la variable `AUTH_*_PASSWORD` correspondan, que Render esté en **Live** y que sus logs indiquen `[users] cuenta lista: ...`. Verifica que `MONGODB_URI` apunta a la base correcta. |
 | `[users] omitido ...` en logs | Falta la variable de contraseña para esa cuenta o está vacía en Render. |
 | No aparecen solicitudes | Revisa `EXTERNAL_API_KEY`, `EXTERNAL_API_URL`, `SYNC_MIN_DATE` y errores `[sync]` en logs. Ejecuta `npm run audit` contra la misma base/API para comparar. |
-| Correo no sale | Revisa `BREVO_API_KEY`, `BREVO_EDUARDO_EMAIL`, remitente verificado `BREVO_SENDER_EMAIL` y respuesta de Brevo. |
+| Correo no sale | Revisa el log de arranque `[mailer] Variables requeridas`: solo indica `presente` o `FALTA`, nunca muestra valores secretos. Si faltan variables, agrégalas en **Environment del servicio correcto de Render** y vuelve a desplegar; si aparecen presentes, revisa el detalle HTTP que devuelve Brevo y que el remitente esté verificado. |
 | Enlace de correo usa localhost | Quita `APPROVAL_PUBLIC_URL` de Render o pon la URL pública correcta; normalmente se recomienda omitirla y usar `RENDER_EXTERNAL_URL`. |
 | Compass muestra `ECONNREFUSED 127.0.0.1:27017` | Compass está conectado al Mongo local. Crea/usa una conexión a Atlas con la URI del clúster. |
 | Compass muestra `bad auth` | Revisa el usuario/contraseña de **Database Access**, reemplaza credenciales guardadas en Compass y codifica caracteres especiales de la contraseña en la URI. |

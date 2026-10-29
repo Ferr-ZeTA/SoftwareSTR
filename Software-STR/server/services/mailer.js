@@ -1,4 +1,31 @@
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email'
+const REQUIRED_BREVO_ENV = [
+  'BREVO_API_KEY',
+  'BREVO_EDUARDO_EMAIL',
+  'BREVO_SENDER_EMAIL',
+]
+
+export function getBrevoConfigStatus(env = process.env) {
+  return Object.fromEntries(
+    REQUIRED_BREVO_ENV.map((name) => [name, Boolean(env[name]?.trim())]),
+  )
+}
+
+export function getBrevoConfigError(env = process.env) {
+  const missing = Object.entries(getBrevoConfigStatus(env))
+    .filter(([, isConfigured]) => !isConfigured)
+    .map(([name]) => name)
+  if (!missing.length) return null
+
+  return `Configuración de Brevo incompleta. Faltan: ${missing.join(', ')}. `
+    + 'Revísalas en Environment del servicio de Render y vuelve a desplegar.'
+}
+
+function getBrevoConfig(env = process.env) {
+  return Object.fromEntries(
+    REQUIRED_BREVO_ENV.map((name) => [name, env[name]?.trim() || '']),
+  )
+}
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -70,10 +97,9 @@ function approvalEmail({ request, token, additionalInfo }) {
 }
 
 export async function sendApprovalEmail({ request, token, additionalInfo }) {
-  const { BREVO_API_KEY, BREVO_EDUARDO_EMAIL, BREVO_SENDER_EMAIL } = process.env
-  if (!BREVO_API_KEY || !BREVO_EDUARDO_EMAIL || !BREVO_SENDER_EMAIL) {
-    throw new Error('Configura BREVO_API_KEY, BREVO_EDUARDO_EMAIL y BREVO_SENDER_EMAIL en .env')
-  }
+  const { BREVO_API_KEY, BREVO_EDUARDO_EMAIL, BREVO_SENDER_EMAIL } = getBrevoConfig()
+  const configError = getBrevoConfigError()
+  if (configError) throw new Error(configError)
 
   const response = await fetch(BREVO_URL, {
     method: 'POST',

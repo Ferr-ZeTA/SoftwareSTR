@@ -655,10 +655,12 @@ No aparecen solicitudes:
   - Ejecutar npm run audit contra la misma base y API.
 
 No se envia correo:
-  - Revisar BREVO_API_KEY.
-  - Revisar BREVO_EDUARDO_EMAIL.
-  - Confirmar que BREVO_SENDER_EMAIL este verificado en Brevo.
-  - Revisar el mensaje que devuelve Brevo.
+  - Revisar el log de arranque [mailer] Variables requeridas: cada variable
+    aparece solo como presente o FALTA; nunca se imprimen valores secretos.
+  - Si falta una variable, agregarla en Environment del servicio correcto de
+    Render y volver a desplegar.
+  - Si todas aparecen presentes, revisar el detalle HTTP que devuelve Brevo y
+    confirmar que BREVO_SENDER_EMAIL este verificado en Brevo.
 
 El enlace del correo usa localhost:
   - Quitar APPROVAL_PUBLIC_URL de Render o poner la URL publica correcta.
