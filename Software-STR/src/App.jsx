@@ -728,21 +728,25 @@ function App() {
   }
 
   const visibleSTRs = user?.role === 'GERENTE_GENERAL' ? strs : strs.filter((str) => str.pais === user?.country)
+  const countryScopedSTRs = useMemo(() => (
+    user?.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos'
+      ? visibleSTRs.filter((str) => str.pais === countryFilter)
+      : visibleSTRs
+  ), [user?.role, countryFilter, visibleSTRs])
 
-  const filteredSTRs = useMemo(() => visibleSTRs.filter((str) => {
+  const filteredSTRs = useMemo(() => countryScopedSTRs.filter((str) => {
     const matchesId = str.id.toLowerCase().includes(search.toLowerCase())
-    const matchesCountry = countryFilter === 'Todos' || str.pais === countryFilter
     const matchesClient = clientFilter === 'Todos' || str.cliente === clientFilter
     const matchesResponsible = responsibleFilter === 'Todos' || str.tipoSolicitud === responsibleFilter
-    return matchesId && matchesCountry && matchesClient && matchesResponsible && (filter === 'Todas' || str.estado === filter)
-  }), [visibleSTRs, search, filter, countryFilter, clientFilter, responsibleFilter])
+    return matchesId && matchesClient && matchesResponsible && (filter === 'Todas' || str.estado === filter)
+  }), [countryScopedSTRs, search, filter, clientFilter, responsibleFilter])
 
   const counts = useMemo(() => ({
-    total: visibleSTRs.length,
-    pending: visibleSTRs.filter((str) => str.estado === 'Pendiente').length,
-    approved: visibleSTRs.filter((str) => str.estado === 'Aprobada').length,
-    rejected: visibleSTRs.filter((str) => str.estado === 'No Aprobada').length,
-  }), [visibleSTRs])
+    total: countryScopedSTRs.length,
+    pending: countryScopedSTRs.filter((str) => str.estado === 'Pendiente').length,
+    approved: countryScopedSTRs.filter((str) => str.estado === 'Aprobada').length,
+    rejected: countryScopedSTRs.filter((str) => str.estado === 'No Aprobada').length,
+  }), [countryScopedSTRs])
 
   const filterOptions = useMemo(() => ({
     countries: [...new Set(visibleSTRs.map((str) => str.pais))],
@@ -780,7 +784,8 @@ function App() {
     setPage(Math.min(Math.max(1, target), totalPages))
   }, [totalPages])
 
-  const hasActiveFilters = search !== '' || filter !== 'Todas' || countryFilter !== 'Todos'
+  const hasActiveFilters = search !== '' || filter !== 'Todas'
+    || (user.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos')
     || clientFilter !== 'Todos' || responsibleFilter !== 'Todos'
 
   function clearFilters() {

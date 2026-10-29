@@ -19,25 +19,48 @@ afterAll(async () => {
 })
 
 describe('provisionConfiguredUsers', () => {
-  it('creates configured accounts in MongoDB with a bcrypt password hash', async () => {
+  it('creates all configured accounts in MongoDB with bcrypt password hashes', async () => {
     const logger = { info: vi.fn(), warn: vi.fn() }
     await provisionConfiguredUsers({
-      env: { AUTH_GUATEMALA_PASSWORD: 'test-password' },
+      env: {
+        AUTH_GLOBAL_PASSWORD: 'global-test-password',
+        AUTH_GUATEMALA_PASSWORD: 'guatemala-test-password',
+        AUTH_ELSALVADOR_PASSWORD: 'elsalvador-test-password',
+      },
       logger,
     })
 
-    const user = await User.findOne({ email: 'gerenteguatemala@red.com' })
-      .select('+passwordHash')
-      .lean()
+    const accounts = await User.find({
+      email: {
+        $in: [
+          'gerentegeneral@red.com',
+          'gerenteguatemala@red.com',
+          'gerenteelsalvador@red.com',
+        ],
+      },
+    }).select('+passwordHash').lean()
+    const byEmail = new Map(accounts.map((account) => [account.email, account]))
 
-    expect(user).toMatchObject({
+    expect(byEmail.get('gerentegeneral@red.com')).toMatchObject({
+      role: 'GERENTE_GENERAL',
+      country: null,
+      active: true,
+    })
+    expect(byEmail.get('gerenteguatemala@red.com')).toMatchObject({
       role: 'GERENTE_REGIONAL',
       country: 'GT',
       active: true,
     })
-    expect(await bcrypt.compare('test-password', user.passwordHash)).toBe(true)
-    expect(logger.info).toHaveBeenCalledWith('[users] cuenta lista: gerenteguatemala@red.com')
-    expect(logger.warn).toHaveBeenCalledTimes(2)
+    expect(byEmail.get('gerenteelsalvador@red.com')).toMatchObject({
+      role: 'GERENTE_REGIONAL',
+      country: 'SV',
+      active: true,
+    })
+    expect(await bcrypt.compare('global-test-password', byEmail.get('gerentegeneral@red.com').passwordHash)).toBe(true)
+    expect(await bcrypt.compare('guatemala-test-password', byEmail.get('gerenteguatemala@red.com').passwordHash)).toBe(true)
+    expect(await bcrypt.compare('elsalvador-test-password', byEmail.get('gerenteelsalvador@red.com').passwordHash)).toBe(true)
+    expect(logger.info).toHaveBeenCalledTimes(3)
+    expect(logger.warn).not.toHaveBeenCalled()
   })
 
   it('synchronizes an existing account password from the current environment', async () => {

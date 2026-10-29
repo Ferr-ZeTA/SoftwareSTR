@@ -61,6 +61,18 @@ sincronización falla.
 El acceso a `/api/users` requiere autenticación y el rol de gerente general;
 los gerentes regionales no pueden listar ni modificar usuarios.
 
+### Estado de las solicitudes
+
+Cada fila que llega desde la API externa se agrupa por país y número de
+documento. Al crearse por primera vez en MongoDB, su estado local comienza como
+`Pendiente`. Ese estado significa que todavía no se ha registrado una decisión
+de aprobación en STRflow; no es un estado leído de SAP. Enviar el correo de
+aprobación tampoco cambia el estado: permanece pendiente hasta que el
+destinatario confirma aprobar o rechazar desde el enlace. La decisión y su
+justificación quedan en MongoDB. La sincronización posterior actualiza los
+datos provenientes de la API, pero conserva el estado local. Solo se importan
+solicitudes desde `SYNC_MIN_DATE` (por defecto, `2026-10-01`).
+
 ### Aprobación por correo
 
 El enlace de aprobación muestra el traslado y solicita únicamente la

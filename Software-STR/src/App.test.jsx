@@ -5,10 +5,11 @@ import userEvent from '@testing-library/user-event'
 // La capa de servicios se sustituye: el test mira la UI, no la red.
 const STRS = Array.from({ length: 25 }, (unused, index) => {
   const number = index + 1
+  const country = number % 2 === 1 ? 'GT' : 'SV'
   return {
-    id: `GT-${1000 + number}`,
+    id: `${country}-${1000 + number}`,
     documento: String(1000 + number),
-    pais: 'GT',
+    pais: country,
     cliente: `Cliente ${number}`,
     clienteCodigo: `CL${number}`,
     clienteIniciales: 'CL',
@@ -111,6 +112,34 @@ describe('paginación de la tabla', () => {
     await user.type(screen.getByLabelText('Buscar por ID de solicitud'), '1023')
     expect(rowIds()).toHaveLength(1)
     expect(rowIds()[0]).toContain('GT-1023')
+  })
+
+  it('filtra por país en la vista general y actualiza conteos y resultados', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText(/Mostrando/)
+
+    await user.selectOptions(screen.getByLabelText('Filtrar por país'), 'SV')
+
+    expect(rowIds()).toHaveLength(10)
+    expect(rowIds()[0]).toContain('SV-1002')
+    expect(screen.getByText('12 resultados')).toBeTruthy()
+    const statusFilters = screen.getByRole('group', { name: 'Filtrar por estado' })
+    expect(within(statusFilters).getByRole('button', { name: /Pendiente/ }).textContent).toContain('12')
+  })
+
+  it('no muestra el selector de país a gerentes regionales', async () => {
+    localStorage.setItem('strflow-user', JSON.stringify({
+      email: 'regional@red.com',
+      name: 'Regional',
+      role: 'GERENTE_REGIONAL',
+      country: 'SV',
+    }))
+    render(<App />)
+
+    await screen.findByText(/Mostrando/)
+    expect(screen.queryByLabelText('Filtrar por país')).toBeNull()
+    expect(rowIds()[0]).toContain('SV-1002')
   })
 
   it('abre gestión de usuarios y oculta opciones sin implementar', async () => {
