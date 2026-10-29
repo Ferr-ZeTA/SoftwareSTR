@@ -52,10 +52,12 @@ Despues de eso, `start.bat` detecta el servicio y lo usa.
 
 La aplicación siempre usa el flujo real: se debe iniciar sesión con una cuenta
 creada en MongoDB y las solicitudes se consultan desde la API externa a través
-del servidor. No hay cuentas ni solicitudes de ejemplo como alternativa. Para
-cargar usuarios y sincronizar las solicitudes iniciales, configura las variables
-de entorno y ejecuta `npm run setup`. En Render, configura `EXTERNAL_API_KEY`
-como variable secreta y revisa los logs del servicio si la sincronización falla.
+del servidor. No hay cuentas ni solicitudes de ejemplo como alternativa. Al
+iniciar, el servidor crea o actualiza las cuentas definidas por las variables
+`AUTH_*_PASSWORD` en la base MongoDB configurada; esas variables son la fuente
+de verdad y sus contraseñas se sincronizan en cada arranque. En Render, configura
+`EXTERNAL_API_KEY` como variable secreta y revisa los logs del servicio si la
+sincronización falla.
 El acceso a `/api/users` requiere autenticación y el rol de gerente general;
 los gerentes regionales no pueden listar ni modificar usuarios.
 

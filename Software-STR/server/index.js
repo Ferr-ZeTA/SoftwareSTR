@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { createApp } from './app.js'
 import { connectDB } from './db.js'
+import { provisionConfiguredUsers } from './services/provisionUsers.js'
 import { syncExternalApi } from './services/syncExternalApi.js'
 
 const port = Number(process.env.PORT || 8787)
@@ -8,6 +9,7 @@ const syncMinutes = Number(process.env.SYNC_INTERVAL_MINUTES || 0)
 
 await connectDB()
 console.log('MongoDB conectado')
+await provisionConfiguredUsers()
 
 if (syncMinutes > 0) {
   const run = async () => {
