@@ -785,7 +785,7 @@ function App() {
   }, [totalPages])
 
   const hasActiveFilters = search !== '' || filter !== 'Todas'
-    || (user.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos')
+    || (user?.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos')
     || clientFilter !== 'Todos' || responsibleFilter !== 'Todos'
 
   function clearFilters() {

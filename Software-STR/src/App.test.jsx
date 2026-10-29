@@ -86,6 +86,13 @@ describe('paginación de la tabla', () => {
     expect(next.disabled).toBe(true)
   })
 
+  it('muestra el inicio de sesión cuando no hay usuario guardado', async () => {
+    localStorage.removeItem('strflow-user')
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Iniciar sesión' })).toBeTruthy()
+  })
+
   it('retrocede y salta por número de página', async () => {
     const user = userEvent.setup()
     render(<App />)
