@@ -34,14 +34,22 @@ vi.mock('./services/strService', () => ({
   sendApprovalEmail: vi.fn(),
   updateLocalStatus: vi.fn(),
   syncNow: vi.fn(),
-  getUsers: vi.fn(async () => []),
+  getUsers: vi.fn(async () => [{
+    _id: 'user-1',
+    name: 'Juanito Juan',
+    email: 'juan@red.com',
+    role: 'GERENTE_REGIONAL',
+    country: 'SV',
+    active: true,
+  }]),
   createUser: vi.fn(),
-  deleteUser: vi.fn(),
+  deleteUser: vi.fn(async () => {}),
   toggleUser: vi.fn(),
   isDemoMode: () => true,
 }))
 
 const { default: App } = await import('./App.jsx')
+const { deleteUser } = await import('./services/strService')
 
 function rowIds() {
   const rows = screen.getAllByRole('row').slice(1) // sin la cabecera
@@ -129,5 +137,30 @@ describe('paginación de la tabla', () => {
     await user.click(screen.getByRole('button', { name: 'Crear usuario' }))
 
     expect(await screen.findByText('Usuario ana@red.com creado correctamente.')).toBeTruthy()
+  })
+
+  it('confirma la eliminación con un diálogo de la aplicación', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: 'Usuarios' }))
+    await screen.findByRole('heading', { name: 'Usuarios del sistema' })
+    await screen.findByText(/juan@red\.com/)
+    await user.click(screen.getByRole('button', { name: /Eliminar/ }))
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText(/¿Seguro que quieres eliminar a/)).toBeTruthy()
+    expect(within(dialog).getByText('juan@red.com')).toBeTruthy()
+    expect(deleteUser).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(deleteUser).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /Eliminar/ }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Sí, eliminar' }))
+
+    expect(deleteUser).toHaveBeenCalledWith('user-1')
+    expect(await screen.findByText('Usuario juan@red.com eliminado.')).toBeTruthy()
   })
 })

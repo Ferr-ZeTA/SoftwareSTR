@@ -210,6 +210,9 @@ function UsersModal({ currentUser, onClose, onToast }) {
   })
   const [error, setError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [userToDelete, setUserToDelete] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [isDeleting, setIsDeleting] = useState(false)
   const demoMode = isDemoMode()
 
   const refresh = useCallback(async () => {
@@ -221,6 +224,17 @@ function UsersModal({ currentUser, onClose, onToast }) {
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  useEffect(() => {
+    if (!userToDelete) return undefined
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape' && !isDeleting) setUserToDelete(null)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [userToDelete, isDeleting])
 
   const update = (field) => (event) => setForm((c) => ({ ...c, [field]: event.target.value }))
 
@@ -242,14 +256,20 @@ function UsersModal({ currentUser, onClose, onToast }) {
     }
   }
 
-  async function handleDelete(user) {
-    if (!window.confirm(`¿Eliminar a ${user.email}? Esta acción no se puede deshacer.`)) return
+  async function confirmDelete() {
+    if (!userToDelete || isDeleting) return
+    const user = userToDelete
+    setDeleteError('')
+    setIsDeleting(true)
     try {
       await deleteUser(user._id)
+      setUserToDelete(null)
       await refresh()
       onToast(`Usuario ${user.email} eliminado.`)
     } catch (caught) {
-      setError(caught.message)
+      setDeleteError(caught.message)
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -333,7 +353,7 @@ function UsersModal({ currentUser, onClose, onToast }) {
                   {user.active ? 'Desactivar' : 'Activar'}
                 </button>
                 {user.email !== currentUser.email && (
-                  <button className="row-action" onClick={() => handleDelete(user)}>
+                  <button className="row-action" onClick={() => { setDeleteError(''); setUserToDelete(user) }}>
                     <Icon name="x" size={13} /> Eliminar
                   </button>
                 )}
@@ -341,6 +361,51 @@ function UsersModal({ currentUser, onClose, onToast }) {
             </div>
           ))}
         </div>
+
+        {userToDelete && (
+          <div
+            className="confirm-backdrop"
+            onClick={(event) => {
+              event.stopPropagation()
+              if (event.target === event.currentTarget && !isDeleting) setUserToDelete(null)
+            }}
+          >
+            <section
+              className="confirm-dialog"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-user-title"
+              aria-describedby="delete-user-description"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <span className="confirm-dialog-icon"><Icon name="x" size={20} /></span>
+              <h3 id="delete-user-title">¿Eliminar usuario?</h3>
+              <p id="delete-user-description">
+                ¿Seguro que quieres eliminar a <strong>{userToDelete.email}</strong>? Esta acción no se puede deshacer.
+              </p>
+              {deleteError && <p className="modal-error" role="alert">{deleteError}</p>}
+              <div className="confirm-actions">
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => setUserToDelete(null)}
+                  disabled={isDeleting}
+                  autoFocus
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="button button-danger"
+                  onClick={confirmDelete}
+                  disabled={isDeleting}
+                >
+                  <Icon name="x" size={15} /> {isDeleting ? 'Eliminando...' : 'Sí, eliminar'}
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
 
         <div className="modal-actions">
           <button className="button button-secondary" onClick={onClose}>Cerrar</button>

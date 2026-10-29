@@ -85,3 +85,10 @@ No configures `APPROVAL_PUBLIC_URL`: si falta, el servidor usa
 En el plan gratuito el servicio se duerme tras 15 minutos sin tráfico, así
 que la sincronización cada 30 minutos solo corre mientras esté despierto.
 Al entrar a la página se despierta y sincroniza al arrancar.
+
+Para mantener la aplicación disponible y sincronizando continuamente, cambia
+el servicio de Render a un plan de pago que no entre en suspensión. MongoDB
+Atlas es un servicio separado: sus datos permanecen allí aunque Render se
+reinicie o se duerma. Esta app usa un servidor Express persistente y una tarea
+`setInterval`, por lo que Vercel no es adecuado para desplegarla tal cual; en
+Vercel habría que mover la API y la sincronización periódica a otro servicio.
