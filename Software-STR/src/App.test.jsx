@@ -45,7 +45,6 @@ vi.mock('./services/strService', () => ({
   createUser: vi.fn(),
   deleteUser: vi.fn(async () => {}),
   toggleUser: vi.fn(),
-  isDemoMode: () => true,
 }))
 
 const { default: App } = await import('./App.jsx')
@@ -121,7 +120,6 @@ describe('paginación de la tabla', () => {
     await user.click(screen.getByRole('link', { name: 'Usuarios' }))
 
     expect(await screen.findByRole('heading', { name: 'Usuarios del sistema' })).toBeTruthy()
-    expect(screen.getByText(/los cambios se guardan en este navegador/)).toBeTruthy()
     expect(screen.queryByRole('link', { name: 'Clientes' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Configuración' })).toBeNull()
   })

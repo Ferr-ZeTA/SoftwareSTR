@@ -48,17 +48,16 @@ Despues de eso, `start.bat` detecta el servicio y lo usa.
 | `npm test` | Tests del frontend |
 | `npm run verify` | Prueba la sincronización contra la API real |
 
-### Modo demo
+### Datos y autenticación
 
-La aplicación inicia en modo demo (`DEMO_MODE=true`), sin autenticación ni
-llamadas al API externo. Muestra cinco solicitudes de ejemplo. La gestión de
-usuarios también es de demostración: sus cambios se guardan solo en ese
-navegador y no crean cuentas reales.
-
-Para administrar usuarios reales, configurar las credenciales y MongoDB, correr
-`npm run setup` y establecer `DEMO_MODE=false` en `.env`. El acceso a `/api/users`
-requiere autenticación y el rol de gerente general; los gerentes regionales no
-pueden listar ni modificar usuarios.
+La aplicación siempre usa el flujo real: se debe iniciar sesión con una cuenta
+creada en MongoDB y las solicitudes se consultan desde la API externa a través
+del servidor. No hay cuentas ni solicitudes de ejemplo como alternativa. Para
+cargar usuarios y sincronizar las solicitudes iniciales, configura las variables
+de entorno y ejecuta `npm run setup`. En Render, configura `EXTERNAL_API_KEY`
+como variable secreta y revisa los logs del servicio si la sincronización falla.
+El acceso a `/api/users` requiere autenticación y el rol de gerente general;
+los gerentes regionales no pueden listar ni modificar usuarios.
 
 ### Aprobación por correo
 

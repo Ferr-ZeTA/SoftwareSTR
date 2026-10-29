@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { login, clearSession, getToken, getUsers, createUser, deleteUser, toggleUser, isDemoMode } from './services/strService'
+import { login, clearSession, getToken, getUsers, createUser, deleteUser, toggleUser } from './services/strService'
 import { useSTRs } from './hooks/useSTRs'
 import { useNotifications } from './hooks/useNotifications'
 import { isMuted, setMuted } from './services/notificationSound'
@@ -213,8 +213,6 @@ function UsersModal({ currentUser, onClose, onToast }) {
   const [userToDelete, setUserToDelete] = useState(null)
   const [deleteError, setDeleteError] = useState('')
   const [isDeleting, setIsDeleting] = useState(false)
-  const demoMode = isDemoMode()
-
   const refresh = useCallback(async () => {
     try {
       setUsers(await getUsers())
@@ -292,13 +290,6 @@ function UsersModal({ currentUser, onClose, onToast }) {
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Cerrar"><Icon name="close" /></button>
         </div>
-
-        {demoMode && (
-          <p className="demo-notice">
-            Modo demo: los cambios se guardan en este navegador y no crean cuentas reales.
-            Configura <code>DEMO_MODE=false</code> para administrar usuarios del sistema.
-          </p>
-        )}
 
         <form className="user-form" onSubmit={handleCreate}>
           <label>Nombre completo
@@ -643,13 +634,6 @@ function NotificationHistory({ history, unread, onMarkAllRead, onClear, onClose 
 
 function App() {
   const [user, setUser] = useState(() => {
-    if (import.meta.env.VITE_DEMO_MODE !== 'false') return {
-      email: 'demo@strflow.local',
-      name: 'Usuario demo',
-      role: 'GERENTE_GENERAL',
-      country: null,
-    }
-
     try {
       // Una sesion guardada por una version anterior no trae JWT: sin token
       // la tabla quedaria vacia sin explicacion, asi que se exige re-login.

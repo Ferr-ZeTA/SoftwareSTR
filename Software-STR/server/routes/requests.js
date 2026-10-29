@@ -8,15 +8,8 @@ import {
 import { sendApprovalEmail, escapeHtml } from '../services/mailer.js'
 import { syncExternalApi } from '../services/syncExternalApi.js'
 import { authorizeInSap } from '../services/sapApproval.js'
-import {
-  issueDemoApprovalToken,
-  consumeDemoApprovalToken,
-  peekDemoApprovalToken,
-  listDemoDecisions,
-} from '../services/demoApprovals.js'
 
 export const requestsRouter = Router()
-const demoMode = process.env.DEMO_MODE !== 'false'
 
 const LIST_PROJECTION = '-raw -approvalTokenHash'
 
@@ -42,7 +35,7 @@ function resultPage(ok, title, message) {
 
 // Pagina que abre el enlace del correo: muestra la solicitud, permite
 // cancelar durante la cuenta regresiva y luego pide solo la justificacion.
-function approvalGatePage({ request, status, token, seconds, error, demo, motivo = '' }) {
+function approvalGatePage({ request, status, token, seconds, error, motivo = '' }) {
   const aprueba = status === 'Aprobada'
   const color = aprueba ? '#0d9488' : '#be123c'
   const filas = (request.items || []).map((item) => `
@@ -95,8 +88,6 @@ function approvalGatePage({ request, status, token, seconds, error, demo, motivo
  .cancel{background:#fff;border-color:#cbd5e1;color:#526276}
  .err{background:#fdeaef;border:1px solid #f6c6d2;color:#be123c;padding:12px 14px;
    border-radius:9px;font-size:13px;margin-bottom:16px}
- .demo{background:#fef3e2;border:1px solid #f6ddb4;color:#b45309;padding:10px 13px;
-   border-radius:9px;font-size:12.5px;margin-bottom:16px}
  .hidden{display:none}
  textarea{width:100%;padding:11px 13px;border:1px solid #cbd5e1;border-radius:9px;
    font-size:14px;font-family:inherit;resize:vertical}
@@ -109,7 +100,6 @@ function approvalGatePage({ request, status, token, seconds, error, demo, motivo
    <div class="sub">Confirmación de ${aprueba ? 'aprobación' : 'rechazo'}</div>
  </div>
  <div class="body">
-   ${demo ? '<div class="demo"><b>Modo demostración.</b> La decisión se guarda solo en memoria y no se escribe en SAP.</div>' : ''}
    ${error ? `<div class="err">${escapeHtml(error)}</div>` : ''}
 
    <h1>Traslado ${escapeHtml(request.documento)}</h1>
@@ -175,7 +165,7 @@ requestsRouter.get('/approve', async (request, response) => {
     return response.status(400).send(resultPage(false, 'Enlace no valido', LINK_ERRORS.invalid))
   }
 
-  const result = peekDemoApprovalToken(token) ?? await peekApprovalToken(token)
+  const result = await peekApprovalToken(token)
   if (!result?.ok) {
     const reason = result?.reason || 'unknown'
     return response.status(reason === 'used' ? 409 : 400)
@@ -187,7 +177,6 @@ requestsRouter.get('/approve', async (request, response) => {
     status,
     token,
     seconds: REVERT_WINDOW_SECONDS,
-    demo: Boolean(peekDemoApprovalToken(token)),
   }))
 })
 
@@ -201,8 +190,7 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
     return response.status(400).send(resultPage(false, 'Enlace no valido', LINK_ERRORS.invalid))
   }
 
-  const demo = Boolean(peekDemoApprovalToken(token))
-  const peeked = peekDemoApprovalToken(token) ?? await peekApprovalToken(token)
+  const peeked = await peekApprovalToken(token)
   if (!peeked?.ok) {
     const reason = peeked?.reason || 'unknown'
     return response.status(reason === 'used' ? 409 : 400)
@@ -216,7 +204,7 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
   if (!sap.ok) {
     // Se devuelve el formulario con la justificacion. El token sigue sirviendo.
     return response.status(sap.retryable ? 400 : 502).send(approvalGatePage({
-      request: peeked.request, status, token, seconds: REVERT_WINDOW_SECONDS, demo,
+      request: peeked.request, status, token, seconds: REVERT_WINDOW_SECONDS,
       error: sap.message, motivo,
     }))
   }
@@ -224,9 +212,7 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
   const constancia = {
     status: SAP_PUSH_STATUS.ENVIADO, code: sap.code, error: null, user: null, motivo,
   }
-  const result = demo
-    ? consumeDemoApprovalToken(token, status, constancia)
-    : await consumeApprovalToken(token, status, constancia)
+  const result = await consumeApprovalToken(token, status, constancia)
 
   if (!result?.ok) {
     const reason = result?.reason || 'unknown'
@@ -249,34 +235,6 @@ requestsRouter.get('/approve/cancel', (request, response) => {
     'Cancelaste a tiempo: el traslado sigue pendiente. '
     + 'Podes volver al correo y elegir de nuevo cuando quieras.',
   ))
-})
-
-requestsRouter.get('/demo/decisions', (request, response) => {
-  if (!demoMode) return response.status(404).json({ error: 'Modo demo desactivado.' })
-  return response.json({ data: listDemoDecisions() })
-})
-
-requestsRouter.post('/demo/send-approval', async (request, response) => {
-  if (!demoMode) return response.status(404).json({ error: 'Modo demo desactivado.' })
-
-  const demo = request.body?.request
-  if (!demo?.id || !['GT', 'SV'].includes(demo.pais)) {
-    return response.status(400).json({ error: 'La solicitud demo no es válida.' })
-  }
-
-  // Nada de esto toca Mongo: el token y la solicitud quemada viven en memoria.
-  const issued = issueDemoApprovalToken(demo, process.env.BREVO_EDUARDO_EMAIL)
-
-  try {
-    const sent = await sendApprovalEmail({
-      request: issued.request,
-      token: issued.token,
-      additionalInfo: request.body?.additionalInfo,
-    })
-    return response.json({ ...sent, expiresAt: issued.expiresAt })
-  } catch (error) {
-    return response.status(502).json({ error: error.message })
-  }
 })
 
 // --- A partir de aqui todo exige JWT y queda acotado por pais. ---

@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import mongoose from 'mongoose'
 import { MongoMemoryServer } from 'mongodb-memory-server'
 
-process.env.DEMO_MODE = 'false'
 process.env.SAP_APPROVAL_ENABLED = 'false'
 
 const [{ createApp }, { Request }, { issueApprovalToken }] = await Promise.all([
