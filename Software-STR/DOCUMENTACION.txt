@@ -1,0 +1,703 @@
+========================================================================
+STRFLOW - DOCUMENTACION COMPLETA DEL PROYECTO
+========================================================================
+
+Contenido
+---------
+01. Descripcion
+02. Arquitectura
+03. Tecnologias y recursos
+04. Estructura del proyecto
+05. Requisitos e instalacion local
+06. Variables de entorno
+07. Comandos disponibles
+08. API externa y sincronizacion de datos
+09. Estados de aprobacion
+10. Autenticacion y permisos
+11. Flujo de aprobacion por correo
+12. API HTTP de STRflow
+13. MongoDB y MongoDB Compass
+14. Despliegue en Render
+15. Diagnostico de problemas
+16. Seguridad y manejo de secretos
+
+
+01. DESCRIPCION
+---------------
+
+STRflow es una aplicacion web para consultar solicitudes de traslado (STR),
+filtrarlas por pais, cliente, tipo y estado, y gestionar su aprobacion.
+
+La API externa es la fuente de los datos operativos del traslado. MongoDB
+conserva una copia sincronizada de dichos datos, asi como los estados,
+decisiones e historial propios de STRflow.
+
+La API externa se utiliza en modo de solo lectura para consultar los
+traslados. Las decisiones de aprobacion no se escriben en esa API: se guardan
+en MongoDB.
+
+
+02. ARQUITECTURA
+----------------
+
+Navegador
+  -> Interfaz React + Vite
+  -> API Express (/api)
+       -> MongoDB Atlas: usuarios, copia de STR y estado local
+       -> API externa: consulta de traslados por pais (GET)
+       -> Brevo: correo de aprobacion
+            -> Enlace publico de aprobacion
+            -> API Express valida la respuesta y guarda la decision en MongoDB
+
+En produccion, Express sirve la API y los archivos compilados del frontend.
+La aplicacion y los enlaces de aprobacion usan el mismo dominio.
+
+En desarrollo, Vite sirve el frontend y envia las solicitudes /api al
+servidor http://localhost:8787.
+
+Al arrancar, el servidor:
+  1. Se conecta a MongoDB.
+  2. Crea o actualiza las cuentas configuradas en variables de entorno.
+  3. Si SYNC_INTERVAL_MINUTES es mayor que cero, sincroniza la API una vez.
+  4. Programa sincronizaciones posteriores con ese intervalo.
+  5. Inicia el servidor Express.
+
+La tarea periodica depende de un proceso Express persistente. El despliegue
+actual esta preparado para Render; Vercel como plataforma serverless no
+mantiene este setInterval de forma confiable.
+
+
+03. TECNOLOGIAS Y RECURSOS
+--------------------------
+
+Interfaz:
+  - React 19
+  - Vite 8
+  - CSS
+  - React Testing Library
+
+Servidor:
+  - Node.js 22 o superior
+  - Express 5
+  - Mongoose 9
+  - JSON Web Tokens (JWT)
+  - bcryptjs para hashes de contrasenas
+
+Servicios:
+  - MongoDB Atlas: persistencia remota
+  - MongoDB local: desarrollo local opcional
+  - API externa de traslados: lectura de datos por pais con X-API-Key
+  - Brevo SMTP API: envio de correos de aprobacion
+  - Render Web Service: servidor y frontend desplegados
+
+Calidad:
+  - Vitest
+  - MongoDB Memory Server
+  - Oxlint
+
+
+04. ESTRUCTURA DEL PROYECTO
+---------------------------
+
+Software-STR/
+  src/
+    App.jsx                         Vistas, filtros, acciones y modales
+    App.css                         Estilos del panel
+    hooks/useSTRs.js                Carga, refresco y sondeo de cambios
+    services/strService.js          Cliente HTTP frontend y adaptacion de datos
+    services/                       Servicios y pruebas de la interfaz
+  server/
+    index.js                        Arranque, aprovisionamiento y sincronizacion
+    app.js                          Middleware, rutas, salud y frontend de produccion
+    db.js                           Conexion a MongoDB
+    middleware/auth.js              JWT, roles y alcance por pais
+    models/
+      Request.js                    Datos externos y estado/historial local
+      User.js                       Cuenta, rol, pais y hash de contrasena
+    routes/
+      auth.js                       Inicio de sesion
+      requests.js                   Solicitudes, sync y aprobacion por correo
+      users.js                      Administracion de usuarios
+    services/
+      syncExternalApi.js            Consulta, normalizacion y upsert de traslados
+      approvalService.js            Tokens de aprobacion de un solo uso
+      provisionUsers.js             Aprovisionamiento de cuentas desde entorno
+      mailer.js                     Plantilla y envio por Brevo
+      sapApproval.js                Integracion SAP desactivada por defecto
+  scripts/
+    dev.js                          Arranque paralelo de API y Vite
+    seedUsers.js                    Aprovisiona las cuentas configuradas
+    migrate.js                      Sincronizacion inicial y purga por fecha
+    audit.js                        Compara MongoDB con API externa
+    verify.js                       Verificacion de integracion
+    verifyApi.js                    Verificaciones de API
+    validate.js                     Validaciones de la aplicacion
+    install-mongodb-service.ps1     Instala MongoDB local como servicio Windows
+  start.bat                         Arranque local de MongoDB, API y frontend
+  stop.bat                          Apagado local
+  .env.example                      Plantilla sin secretos reales
+  README.md                         Documentacion en formato Markdown
+
+En la raiz del repositorio:
+  render.yaml                       Blueprint de Render
+
+
+05. REQUISITOS E INSTALACION LOCAL
+----------------------------------
+
+Requisitos:
+  - Node.js 22 o superior
+  - npm
+  - MongoDB local o una URI de MongoDB Atlas
+  - Acceso a la API externa para sincronizar traslados
+  - Cuenta y credenciales de Brevo para probar el correo
+
+Instalacion desde PowerShell:
+
+  cd C:\SoftwareSTR\Software-STR
+  npm ci
+  Copy-Item .env.example .env
+
+Completar .env con los valores locales. No subir .env a GitHub.
+No compartir el archivo ni su contenido en chats o capturas.
+
+Arranque local recomendado en Windows:
+
+  start.bat
+
+El script detecta o inicia MongoDB local, levanta la API en el puerto 8787,
+inicia Vite en el puerto 5173 y abre el navegador. Para apagar, usar stop.bat.
+
+Si MongoDB esta instalado como servicio de Windows, start.bat lo reutiliza.
+Para instalar el servicio local y apuntarlo a .mongodb-data:
+
+  Abrir PowerShell como administrador
+  cd C:\SoftwareSTR\Software-STR
+  powershell -ExecutionPolicy Bypass -File scripts\install-mongodb-service.ps1
+
+El comando npm run dev inicia API y Vite en paralelo, pero no inicia MongoDB.
+MongoDB debe estar activo antes de iniciar la API.
+
+
+06. VARIABLES DE ENTORNO
+------------------------
+
+PORT
+  Opcional. Puerto HTTP. Predeterminado: 8787. Render proporciona su valor.
+
+MONGODB_URI
+  Obligatoria. URI de MongoDB local o Atlas.
+
+MONGODB_DB
+  Opcional. Nombre de la base. Predeterminado: strflow.
+
+JWT_SECRET
+  Necesaria para autenticacion. Secreto privado usado para firmar JWT.
+
+JWT_EXPIRES_IN
+  Opcional. Duracion del JWT. Predeterminado: 8h.
+
+AUTH_GLOBAL_EMAIL
+  Opcional. Correo de gerente general.
+  Predeterminado: gerentegeneral@red.com.
+
+AUTH_GLOBAL_PASSWORD
+  Contraseña para aprovisionar gerente general.
+
+AUTH_GUATEMALA_PASSWORD
+  Contraseña para aprovisionar gerente regional de Guatemala.
+
+AUTH_ELSALVADOR_PASSWORD
+  Contraseña para aprovisionar gerente regional de El Salvador.
+
+EXTERNAL_API_URL
+  Opcional. Endpoint de lectura de solicitudes. Tiene un valor predeterminado
+  configurado en el servicio de sincronizacion.
+
+EXTERNAL_API_KEY
+  Necesaria para sincronizar. Se envia en el header X-API-Key.
+
+SYNC_MIN_DATE
+  Opcional. Fecha minima para importar solicitudes.
+  Predeterminado: 2026-10-01T00:00:00Z.
+
+SYNC_INTERVAL_MINUTES
+  Opcional. Intervalo de sincronizacion automatica. El valor 0 la desactiva.
+
+BREVO_API_KEY
+  Necesaria para enviar correos. Llave privada de Brevo.
+
+BREVO_EDUARDO_EMAIL
+  Necesaria para enviar correos. Destinatario de aprobaciones.
+
+BREVO_SENDER_EMAIL
+  Necesaria para enviar correos. Remitente verificado en Brevo.
+
+BREVO_SENDER_NAME
+  Opcional. Nombre visible del remitente. Predeterminado: STRflow.
+
+APPROVAL_PUBLIC_URL
+  Opcional. URL publica base de los enlaces. En Render, si se omite, se usa
+  RENDER_EXTERNAL_URL.
+
+APPROVAL_TOKEN_TTL_HOURS
+  Opcional. Vigencia del token de aprobacion. Predeterminado: 72 horas.
+
+REVERT_WINDOW_SECONDS
+  Opcional. Cuenta regresiva antes de mostrar confirmacion. Predeterminado: 10.
+
+CORS_ORIGIN
+  Opcional. Origen permitido por CORS. Predeterminado: *.
+
+SAP_APPROVAL_URL
+  Opcional. Endpoint para registrar decisiones en SAP. Contrato pendiente.
+
+SAP_APPROVAL_ENABLED
+  Mantener false hasta confirmar endpoint, formato y autenticacion de servidor.
+
+Provisionamiento de cuentas:
+  - El servidor intenta crear o actualizar las cuentas configuradas al arrancar.
+  - Si falta una contraseña, esa cuenta se omite y se registra una advertencia.
+  - Si la contraseña esta definida, la cuenta se crea o actualiza en MongoDB.
+  - La contraseña se guarda como hash bcrypt; no se guarda en texto plano.
+  - Los valores de entorno son la fuente de verdad y restablecen la contraseña
+    de esas cuentas en cada arranque.
+  - Mantener actualizadas las variables AUTH_*_PASSWORD en Render.
+
+
+07. COMANDOS DISPONIBLES
+------------------------
+
+npm start
+  Ejecuta start.bat en Windows. Inicia MongoDB local, API y frontend.
+
+npm stop
+  Ejecuta stop.bat.
+
+npm run dev
+  Inicia API y Vite en paralelo. MongoDB debe estar activo.
+
+npm run dev:web
+  Inicia solamente Vite.
+
+npm run api
+  Inicia solamente Express.
+
+npm run build
+  Compila el frontend en dist/.
+
+npm run preview
+  Previsualiza el build de Vite.
+
+npm test
+  Ejecuta las pruebas una vez.
+
+npm run test:watch
+  Ejecuta Vitest en modo de observacion.
+
+npm run lint
+  Ejecuta Oxlint.
+
+npm run seed
+  Crea o actualiza las cuentas a partir de las variables de entorno.
+
+npm run migrate
+  Sincroniza datos y purga documentos fuera del rango de fecha.
+
+npm run setup
+  Ejecuta seed y despues migrate.
+
+npm run audit
+  Compara los registros de MongoDB con la API externa y reporta estados.
+
+npm run verify
+  Ejecuta la verificacion de integracion del proyecto.
+
+npm run verify:api
+  Ejecuta verificaciones de API.
+
+npm run validate
+  Ejecuta validaciones integrales.
+
+ADVERTENCIA SOBRE MIGRATE Y SETUP:
+  scripts/migrate.js elimina documentos cuya fecha sea anterior a
+  SYNC_MIN_DATE o cuya fecha sea nula. Antes de ejecutar npm run migrate o
+  npm run setup contra una base existente:
+    1. Revisar SYNC_MIN_DATE.
+    2. Respaldar MongoDB.
+    3. Confirmar que se desea purgar documentos fuera del rango.
+
+  No usar npm run migrate -- --drop salvo que se quiera borrar toda la
+  coleccion de solicitudes. Es una accion destructiva.
+
+
+08. API EXTERNA Y SINCRONIZACION DE DATOS
+----------------------------------------
+
+La API externa se consulta en modo de solo lectura. STRflow no actualiza en
+esa API los estados de aprobacion.
+
+MongoDB conserva:
+  1. Una copia sincronizada de datos operativos de la API.
+  2. El estado local de STRflow: Pendiente, Aprobada o No Aprobada.
+  3. Justificacion, autor, fecha y canal de decision, e historial.
+
+Consulta:
+
+  GET {EXTERNAL_API_URL}?var_pais=GT
+  X-API-Key: {EXTERNAL_API_KEY}
+  Accept: application/json
+
+Se hace una consulta para GT y otra para SV. La respuesta puede ser un arreglo
+JSON directo o estar dentro de data, value o result.
+
+Transformacion:
+  - La API puede entregar una fila por articulo/modelo.
+  - Las filas se agrupan por pais y numero de documento.
+  - El identificador se construye como PAIS-documento, por ejemplo GT-12345.
+  - Cada articulo se guarda como una linea dentro de items.
+  - Se calculan el numero de lineas y la cantidad total.
+  - Las fechas en formato dia/mes/año se interpretan antes de guardar.
+  - Se descartan solicitudes anteriores a SYNC_MIN_DATE.
+
+Comportamiento de sincronizacion:
+
+  Solicitud nueva:
+    Se inserta en MongoDB con localStatus Pendiente y campos locales iniciales.
+
+  Solicitud ya existente:
+    Se actualizan los campos que son propiedad de la API.
+    No se sobrescriben localStatus, notas, tokens ni historial de decisiones.
+
+  Solicitud deja de venir en una respuesta valida:
+    Se marca missingFromApi y se guarda missingSince.
+    No se borra el documento ni su decision.
+    Si vuelve a aparecer, se quita la marca.
+
+  API devuelve error:
+    Se registra el error. No se considera el pais sincronizado correctamente
+    ni se borran decisiones locales.
+
+  Respuesta 404 vacia:
+    Se trata como pais sin datos. No se usa para inferir que los registros
+    anteriores deban borrarse.
+
+Frecuencia:
+  - Con SYNC_INTERVAL_MINUTES mayor que cero, se sincroniza al arrancar y luego
+    cada ese numero de minutos.
+  - El boton Actualizar del gerente general dispara una sincronizacion manual.
+  - El gerente regional solo vuelve a leer los datos ya disponibles en MongoDB.
+
+
+09. ESTADOS DE APROBACION
+-------------------------
+
+Pendiente:
+  No existe una decision local confirmada. Es el estado inicial de cada
+  solicitud nueva importada.
+
+Aprobada:
+  La decision de aprobacion quedo confirmada en STRflow.
+
+No Aprobada:
+  La solicitud fue rechazada en STRflow.
+
+Enviar un correo no cambia el estado. Solo crea y envia un enlace de decision.
+El estado cambia cuando el destinatario confirma la respuesta desde el enlace
+o cuando un usuario autenticado modifica el estado desde el panel.
+
+El estado y el historial viven en MongoDB porque el endpoint externo consultado
+no recibe escrituras.
+
+
+10. AUTENTICACION Y PERMISOS
+----------------------------
+
+El login:
+  1. Busca una cuenta activa por correo.
+  2. Compara la contraseña con el hash bcrypt guardado.
+  3. Emite un JWT si las credenciales coinciden.
+  4. El frontend guarda el token en localStorage.
+  5. Las rutas protegidas reciben Authorization: Bearer <token>.
+  6. Una sesion expirada requiere iniciar sesion de nuevo.
+
+Roles:
+
+GERENTE_GENERAL
+  - Ve solicitudes de Guatemala y El Salvador.
+  - Puede filtrar por pais.
+  - Puede administrar usuarios.
+  - Puede sincronizar manualmente la API.
+
+GERENTE_REGIONAL
+  - Solo ve solicitudes de su pais GT o SV.
+  - No puede administrar usuarios ni iniciar la sincronizacion general.
+
+La restriccion de pais no depende solo del filtro visual: el servidor aplica
+el alcance regional a las consultas y mutaciones.
+
+
+11. FLUJO DE APROBACION POR CORREO
+----------------------------------
+
+1. Un usuario autenticado solicita enviar una STR a aprobacion.
+2. El servidor obtiene la STR de MongoDB.
+3. Genera un token aleatorio de un solo uso y guarda solo el hash y expiracion.
+4. Brevo envia el detalle, informacion adicional y enlaces para aprobar o
+   rechazar.
+5. El enlace abre una pagina de confirmacion con una cuenta regresiva.
+6. La pagina solicita justificacion: opcional al aprobar y obligatoria al
+   rechazar.
+7. El servidor valida y consume el token de forma atomica.
+8. Se guarda estado, fecha, destinatario y justificacion en MongoDB.
+9. El frontend consulta periodicamente las solicitudes para detectar cambios
+   hechos por correo y mostrar una notificacion.
+
+Los enlaces:
+  - Expiran segun APPROVAL_TOKEN_TTL_HOURS.
+  - Son de un solo uso.
+  - Guardan solo el hash del token en MongoDB.
+
+En Render se recomienda omitir APPROVAL_PUBLIC_URL para que el servidor use
+RENDER_EXTERNAL_URL. No configurar una URL localhost en produccion.
+
+Integracion SAP:
+  - La consulta GET externa es de solo lectura.
+  - La escritura de aprobaciones esta desactivada por defecto.
+  - Mantener SAP_APPROVAL_ENABLED=false hasta contar con contrato confirmado,
+    endpoint y autenticacion del lado del servidor.
+  - Mientras este desactivado, la decision se guarda en MongoDB y la constancia
+    SAP aparece como simulada.
+  - El formulario publico no solicita usuario ni contraseña SAP.
+
+
+12. API HTTP DE STRFLOW
+-----------------------
+
+Las rutas de solicitudes aplican JWT y alcance por pais, excepto los endpoints
+publicos indicados abajo.
+
+SALUD Y AUTENTICACION
+
+GET /api/health
+  Acceso: publico.
+  Funcion: indica que Express responde con {"ok":true}.
+
+POST /api/auth/login
+  Acceso: publico.
+  Body: {"email":"...","password":"..."}.
+  Funcion: valida credenciales y devuelve JWT y usuario.
+
+GET /api/auth/me
+  Acceso: JWT.
+  Funcion: devuelve la identidad asociada al JWT.
+
+SOLICITUDES
+
+GET /api/requests
+  Acceso: JWT.
+  Funcion: lista solicitudes con paginacion y filtros.
+  Parametros: page, limit (maximo 200), status, country, tipo, search, from, to.
+
+GET /api/requests/:externalId
+  Acceso: JWT.
+  Funcion: obtiene una solicitud dentro del alcance del usuario.
+
+PATCH /api/requests/:externalId
+  Acceso: JWT.
+  Funcion: cambia el estado local y/o las notas internas.
+
+POST /api/requests/sync
+  Acceso: JWT y gerente general.
+  Body opcional: {"countries":["GT"]}.
+  Funcion: sincroniza los paises indicados o ambos por defecto.
+
+POST /api/requests/:externalId/send-approval
+  Acceso: JWT.
+  Body opcional: {"additionalInfo":"..."}.
+  Funcion: envia el correo de aprobacion.
+
+DELETE /api/requests/:externalId
+  Acceso: JWT.
+  Funcion: oculta localmente; no elimina de la API externa.
+
+POST /api/requests/:externalId/restore
+  Acceso: JWT.
+  Funcion: restaura una solicitud ocultada.
+
+APROBACION PUBLICA
+
+GET /api/requests/approve?token=...&status=...
+  Acceso: token de correo.
+  Funcion: muestra la confirmacion.
+
+POST /api/requests/approve/confirm
+  Acceso: token de correo.
+  Funcion: confirma estado y justificacion.
+
+GET /api/requests/approve/cancel
+  Acceso: publico.
+  Funcion: informa que se cancelo sin guardar una decision.
+
+USUARIOS
+Todas estas rutas requieren JWT y rol GERENTE_GENERAL.
+
+GET /api/users
+  Lista cuentas sin hashes de contraseñas.
+
+POST /api/users
+  Crea cuenta; requiere nombre, correo, contraseña y rol.
+
+PATCH /api/users/:id
+  Cambia nombre, actividad o contraseña.
+
+DELETE /api/users/:id
+  Elimina cuenta; no permite eliminar la cuenta autenticada.
+
+
+13. MONGODB Y MONGODB COMPASS
+-----------------------------
+
+Nombre de base predeterminado: strflow.
+
+Coleccion requests:
+  - Un documento por solicitud.
+  - externalId tiene formato GT-... o SV-....
+  - Datos sincronizados: documento, pais, fecha, cliente, bodegas, tipo,
+    lineas, cantidades y datos de origen.
+  - Estado local: localStatus, notas, indicador de oculto y marca de ausencia.
+  - Auditoria: autor, fecha, canal e historial de decisiones.
+  - Aprobacion: destinatario y hash/fechas del token.
+  - SAP: constancia informativa; no incluye contraseñas.
+
+Coleccion users:
+  - Correo unico, nombre, rol, pais, estado activo y ultimo login.
+  - passwordHash bcrypt; el modelo lo excluye de las consultas normales.
+
+Para ver la base alojada:
+  1. Conectar Compass al mismo cluster Atlas usado por MONGODB_URI en Render.
+  2. Usar un usuario de Database Access de Atlas.
+  3. Permitir la IP del equipo en Network Access.
+  4. Verificar que Render tambien tenga acceso al cluster.
+  5. Abrir la base strflow y las colecciones requests y users.
+
+El usuario de Database Access es distinto de la cuenta web de Atlas y de las
+cuentas de STRflow.
+
+La URI mongodb://127.0.0.1:27017 apunta al Mongo local de la computadora, no
+a Atlas.
+
+No compartir la URI, usuario/contraseña de Atlas ni capturas que los muestren.
+
+
+14. DESPLIEGUE EN RENDER
+------------------------
+
+render.yaml configura:
+  - Servicio web Node llamado strflow.
+  - Root Directory: Software-STR.
+  - Build: npm ci && npm run build.
+  - Start: node server/index.js.
+
+Configuracion inicial:
+
+1. Subir el repositorio a GitHub.
+2. En Render, crear un Blueprint y seleccionar el repositorio que contiene
+   render.yaml.
+3. Crear un cluster MongoDB Atlas y un Database User.
+4. Autorizar conexiones de red para Render en Atlas.
+5. En Render -> servicio -> Environment, configurar:
+     MONGODB_URI
+     EXTERNAL_API_KEY
+     BREVO_API_KEY
+     BREVO_EDUARDO_EMAIL
+     BREVO_SENDER_EMAIL
+     AUTH_GLOBAL_PASSWORD
+     AUTH_GUATEMALA_PASSWORD
+     AUTH_ELSALVADOR_PASSWORD
+6. Verificar tambien:
+     MONGODB_DB=strflow
+     JWT_SECRET (generada por Blueprint)
+     SYNC_INTERVAL_MINUTES
+     SYNC_MIN_DATE
+7. Guardar y esperar a que el deploy aparezca Live.
+8. Revisar logs de Mongo, aprovisionamiento de usuarios y sincronizacion.
+9. Iniciar sesion con los correos y contraseñas configurados en Render.
+
+No es necesario ejecutar npm run setup en Shell para crear cuentas: el
+servidor las aprovisiona al arrancar.
+
+Si se cambia el usuario o contraseña de base de datos de Atlas, actualizar
+MONGODB_URI en Render. El .env local no se copia automaticamente a Render.
+
+En el plan gratuito, Render puede suspender el servicio tras un periodo sin
+trafico. Mientras este dormido no ejecuta la sincronizacion periodica. Al
+despertar vuelve a arrancar y hace una sincronizacion inicial. Para mantener
+el proceso activo continuamente se requiere un plan que no suspenda el
+servicio.
+
+
+15. DIAGNOSTICO DE PROBLEMAS
+----------------------------
+
+Login devuelve 401:
+  - Confirmar que el correo corresponde a la variable AUTH_*_PASSWORD correcta.
+  - Confirmar que Render esta Live.
+  - Revisar logs para [users] cuenta lista: correo.
+  - Verificar que MONGODB_URI apunte a la base correcta.
+
+Logs muestran [users] omitido:
+  - Falta la variable de contraseña de esa cuenta o esta vacia en Render.
+
+No aparecen solicitudes:
+  - Revisar EXTERNAL_API_KEY, EXTERNAL_API_URL y SYNC_MIN_DATE.
+  - Revisar errores [sync] en logs.
+  - Ejecutar npm run audit contra la misma base y API.
+
+No se envia correo:
+  - Revisar BREVO_API_KEY.
+  - Revisar BREVO_EDUARDO_EMAIL.
+  - Confirmar que BREVO_SENDER_EMAIL este verificado en Brevo.
+  - Revisar el mensaje que devuelve Brevo.
+
+El enlace del correo usa localhost:
+  - Quitar APPROVAL_PUBLIC_URL de Render o poner la URL publica correcta.
+  - Se recomienda omitirla y usar RENDER_EXTERNAL_URL.
+
+Compass muestra ECONNREFUSED 127.0.0.1:27017:
+  - Compass intenta conectarse al Mongo local.
+  - Crear/usar una conexion Atlas con la URI del cluster.
+
+Compass muestra bad auth:
+  - Revisar usuario y contraseña de Database Access.
+  - Actualizar las credenciales guardadas en Compass.
+  - Codificar caracteres especiales de la contraseña dentro de la URI.
+
+Compass conecta pero no muestra datos de Render:
+  - Confirmar que Compass y Render usen el mismo cluster.
+  - Confirmar que la base se llame strflow.
+
+Una STR desaparecio de la API:
+  - Revisar missingFromApi en MongoDB.
+  - El registro y su estado local se conservan; no se borran por desaparecer
+    temporalmente de la API.
+
+
+16. SEGURIDAD Y MANEJO DE SECRETOS
+----------------------------------
+
+Nunca compartir ni subir a Git:
+  - El archivo .env.
+  - MONGODB_URI.
+  - Contraseñas de Atlas o de STRflow.
+  - JWT_SECRET o tokens JWT.
+  - EXTERNAL_API_KEY.
+  - BREVO_API_KEY.
+  - Tokens de aprobacion.
+
+Configurar los secretos de produccion en Render Environment. Para reportar un
+error, compartir logs redactados sin credenciales ni URI.
+
+========================================================================
+FIN DE LA DOCUMENTACION
+========================================================================

@@ -388,6 +388,7 @@ requestsRouter.post('/:externalId/send-approval', async (request, response) => {
     })
     response.json({ ...sent, expiresAt: issued.expiresAt })
   } catch (error) {
+    console.error(`[approval-email] ${error.message}`)
     response.status(502).json({ error: error.message })
   }
 })

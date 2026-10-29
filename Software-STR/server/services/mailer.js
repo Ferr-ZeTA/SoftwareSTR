@@ -91,7 +91,12 @@ export async function sendApprovalEmail({ request, token, additionalInfo }) {
   })
 
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.message || 'Brevo rechazó el envío.')
+  if (!response.ok) {
+    throw new Error(
+      `Brevo rechazó el envío (HTTP ${response.status}): `
+      + `${payload.message || 'revisa la API key y el remitente verificado.'}`,
+    )
+  }
   return { sent: true, messageId: payload.messageId, to: BREVO_EDUARDO_EMAIL }
 }
 

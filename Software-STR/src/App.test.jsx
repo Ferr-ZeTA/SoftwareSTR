@@ -49,7 +49,7 @@ vi.mock('./services/strService', () => ({
 }))
 
 const { default: App } = await import('./App.jsx')
-const { deleteUser } = await import('./services/strService')
+const { deleteUser, sendApprovalEmail } = await import('./services/strService')
 
 function rowIds() {
   const rows = screen.getAllByRole('row').slice(1) // sin la cabecera
@@ -126,6 +126,23 @@ describe('paginación de la tabla', () => {
     expect(screen.getByText('12 resultados')).toBeTruthy()
     const statusFilters = screen.getByRole('group', { name: 'Filtrar por estado' })
     expect(within(statusFilters).getByRole('button', { name: /Pendiente/ }).textContent).toContain('12')
+  })
+
+  it('muestra errores al enviar el correo sin desmontar la aplicación', async () => {
+    const user = userEvent.setup()
+    sendApprovalEmail.mockRejectedValueOnce(
+      new Error('Brevo rechazó el envío (HTTP 400): sender is not verified'),
+    )
+    render(<App />)
+    await screen.findByText(/Mostrando/)
+
+    await user.click(screen.getAllByRole('button', { name: /Aprobación/ })[0])
+    await user.click(screen.getByRole('button', { name: /Enviar a gerente/ }))
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/sender is not verified/)
+    expect(screen.getByRole('heading', { name: 'Solicitudes STR' })).toBeTruthy()
+    expect(dialog).toBeTruthy()
   })
 
   it('no muestra el selector de país a gerentes regionales', async () => {
