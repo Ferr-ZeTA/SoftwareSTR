@@ -1568,7 +1568,7 @@ input, textarea, select { transition: border-color .2s var(--ease), box-shadow .
   .stats-grid { grid-template-columns: 1fr; }
 }
 
-/* ---------- Bandeja de aprobaciones y facturas pospuestas ---------- */
+/* ---------- Bandeja de aprobaciones y solicitudes pospuestas ---------- */
 
 .approval-queue { display: grid; gap: 16px; }
 .approval-card {
@@ -1609,7 +1609,7 @@ input, textarea, select { transition: border-color .2s var(--ease), box-shadow .
 .approval-note-error { color: var(--red); font-size: 12px; font-weight: 500; }
 .approval-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin-top: 18px; }
 .approval-card-actions .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-.deferred-invoice-card > p { color: var(--muted); font-size: 13px; }
+.deferred-approval-card > p { color: var(--muted); font-size: 13px; }
 .approval-empty {
   display: grid; justify-items: center; gap: 10px; padding: 48px 24px;
   background: var(--surface); border: 1px solid var(--line-soft);

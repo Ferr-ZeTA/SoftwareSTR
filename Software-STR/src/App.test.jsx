@@ -201,7 +201,7 @@ describe('paginación de la tabla', () => {
     )
   })
 
-  it('muestra en Ver facturas las solicitudes pospuestas de ambos países', async () => {
+  it('mantiene solicitudes pospuestas en la bandeja de aprobaciones para ambos países', async () => {
     const user = userEvent.setup()
     STRS[0].aprobacionEnviada = true
     STRS[1].aprobacionEnviada = true
@@ -213,13 +213,12 @@ describe('paginación de la tabla', () => {
     await user.click(screen.getByRole('button', { name: /Ver más tarde/ }))
     expect(deferApproval).toHaveBeenCalledWith('GT-1001')
 
-    await user.click(screen.getByRole('link', { name: /Ver facturas/ }))
-    expect(await screen.findByRole('heading', { name: 'Ver facturas' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Para revisar más tarde' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Ver facturas/ })).toBeNull()
     expect(screen.getByRole('heading', { name: /GT-1001/ })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /SV-1002/ })).toBeTruthy()
-    await user.click(screen.getAllByRole('button', { name: /Regresar a aprobaciones/ })[0])
+    await user.click(screen.getAllByRole('button', { name: /Volver a pendientes/ })[0])
     expect(restoreApproval).toHaveBeenCalledWith('GT-1001')
-    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
     expect(await screen.findByRole('button', { name: /Ver más tarde/ })).toBeTruthy()
   })
 

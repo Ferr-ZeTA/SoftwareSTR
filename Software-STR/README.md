@@ -2,8 +2,8 @@
 
 STRflow es una aplicación web para consultar solicitudes de traslado (STR),
 filtrarlas por país, cliente, tipo y estado, y gestionar su aprobación. La API
-externa es la fuente de los datos operativos del traslado; MongoDB conserva una
-copia sincronizada y los estados, decisiones e historial propios de STRflow.
+externa es la fuente de los datos operativos del traslado; MongoDB conserva
+solo las referencias necesarias y los estados, decisiones e historial locales.
 
 ## Contenido
 
@@ -27,7 +27,7 @@ copia sincronizada y los estados, decisiones e historial propios de STRflow.
 Navegador
   └── React + Vite
         └── API Express (/api)
-              ├── MongoDB Atlas: usuarios, copia de STR y estado local
+              ├── MongoDB Atlas: usuarios y estado local de aprobación
               ├── API externa: consulta de traslados por país (GET)
               └── Brevo: correo de aprobación
                     └── Enlace público de aprobación → API Express → MongoDB
@@ -38,11 +38,10 @@ frontend. Así, la aplicación y los enlaces de aprobación usan el mismo domini
 En desarrollo, Vite sirve el frontend y reenvía `/api` a
 `http://localhost:8787`.
 
-El servidor conecta con MongoDB al arrancar, aprovisiona las cuentas definidas
-por variables de entorno y, si `SYNC_INTERVAL_MINUTES` es mayor que cero,
-ejecuta una sincronización inicial y luego una periódica. El proceso persistente
-de Express es importante para esa tarea; Vercel como función serverless no
-ejecuta este `setInterval` de manera confiable.
+El servidor conecta con MongoDB al arrancar y aprovisiona las cuentas definidas
+por variables de entorno. El navegador consulta el backend, que obtiene los
+datos operativos de la API externa y los combina con el estado local de MongoDB.
+La llave de la API nunca se expone al navegador.
 
 ## Tecnologías y recursos
 
@@ -50,7 +49,7 @@ ejecuta este `setInterval` de manera confiable.
 |---|---|---|
 | Interfaz | React 19, Vite 8, CSS | Panel de solicitudes, filtros, paginación, login y aprobaciones |
 | Servidor | Node.js 22, Express 5 | API, autenticación, envío de correo y enlaces públicos |
-| Persistencia | MongoDB con Mongoose 9 | Usuarios y solicitudes sincronizadas con decisiones locales |
+| Persistencia | MongoDB con Mongoose 9 | Usuarios y estado local de solicitudes |
 | Datos operativos | API externa de traslados | Lectura de datos por país usando `X-API-Key` |
 | Correo | Brevo SMTP API | Envío de solicitudes de aprobación |
 | Alojamiento | Render Web Service | Ejecuta el servidor y sirve el frontend compilado |
@@ -68,19 +67,19 @@ Software-STR/
 │   ├── hooks/useSTRs.js            # Carga, refresco y sondeo de cambios
 │   └── services/strService.js      # Cliente HTTP del frontend y adaptación de datos
 ├── server/
-│   ├── index.js                    # Arranque, aprovisionamiento y sincronización automática
+│   ├── index.js                    # Arranque, limpieza de campos antiguos y aprovisionamiento
 │   ├── app.js                      # Middleware, rutas, salud y frontend de producción
 │   ├── db.js                       # Conexión a MongoDB
 │   ├── middleware/auth.js          # JWT, roles y alcance por país
 │   ├── models/
-│   │   ├── Request.js              # Solicitud externa y estado/historial local
+│   │   ├── Request.js              # Referencia externa y estado/historial local
 │   │   └── User.js                 # Cuenta, rol, país y hash de contraseña
 │   ├── routes/
 │   │   ├── auth.js                 # Inicio de sesión y usuario autenticado
 │   │   ├── requests.js             # Solicitudes, sync y aprobación por enlace
 │   │   └── users.js                # Administración de usuarios
 │   └── services/
-│       ├── syncExternalApi.js      # Consulta, normalización y upsert de traslados
+│       ├── syncExternalApi.js      # Consulta y normalización de datos actuales de la API
 │       ├── approvalService.js      # Tokens de aprobación de un solo uso
 │       ├── provisionUsers.js       # Cuentas definidas por variables de entorno
 │       ├── mailer.js               # Plantilla y envío por Brevo
@@ -134,9 +133,8 @@ secretos reales.
 | `AUTH_GUATEMALA_PASSWORD` | Para provisionar Guatemala | Contraseña inicial/administrada de esa cuenta. |
 | `AUTH_ELSALVADOR_PASSWORD` | Para provisionar El Salvador | Contraseña inicial/administrada de esa cuenta. |
 | `EXTERNAL_API_URL` | No | Endpoint de lectura de STR; tiene un valor predeterminado en el servicio. |
-| `EXTERNAL_API_KEY` | Sí para sincronizar | Llave enviada en el header `X-API-Key`. |
-| `SYNC_MIN_DATE` | No | Fecha mínima importada; predeterminada `2026-10-01T00:00:00Z`. |
-| `SYNC_INTERVAL_MINUTES` | No | Intervalo de sincronización; `0` desactiva el ciclo. |
+| `EXTERNAL_API_KEY` | Sí para consultar solicitudes | Llave enviada por el backend en `X-API-Key`; nunca se expone al navegador. |
+| `SYNC_MIN_DATE` | No | Fecha mínima consultada; predeterminada `2026-10-01T00:00:00Z`. |
 | `BREVO_API_KEY` | Sí para enviar correo | Llave privada de Brevo. |
 | `BREVO_EDUARDO_EMAIL` | Sí para enviar correo | Destinatario de las solicitudes de aprobación. |
 | `BREVO_SENDER_EMAIL` | Sí para enviar correo | Remitente verificado en Brevo. |
@@ -188,33 +186,27 @@ disponible.
 | `npm run test:watch` | Ejecuta Vitest en modo observación. |
 | `npm run lint` | Ejecuta Oxlint. |
 | `npm run seed` | Crea/actualiza las cuentas desde variables de entorno. |
-| `npm run migrate` | Sincroniza datos y purga documentos fuera del rango configurado. |
-| `npm run setup` | Ejecuta `seed` y luego `migrate`; leer advertencia antes de usarlo. |
-| `npm run audit` | Compara los registros de MongoDB con la API externa y reporta estados. |
-| `npm run verify` | Ejecuta la verificación de integración definida por el proyecto. |
-| `npm run verify:api` | Ejecuta verificaciones de la API. |
-| `npm run validate` | Ejecuta validaciones integrales definidas por el proyecto. |
-
-> **Cuidado con `npm run setup` y `npm run migrate`:** además de sincronizar,
-> `scripts/migrate.js` elimina documentos cuya fecha sea anterior a
-> `SYNC_MIN_DATE` o no tenga fecha. No ejecutes `npm run setup` sobre una base
-> existente sin revisar el rango y respaldar MongoDB. No uses `--drop` salvo que
-> realmente quieras borrar toda la colección de solicitudes.
+| `npm run migrate` | Consulta la API y reporta el estado local; no copia ni elimina traslados. |
+| `npm run setup` | Ejecuta `seed` y luego el reporte no destructivo de `migrate`. |
+| `npm run audit` | Compara las solicitudes actuales de API con referencias de estado local. |
+| `npm run verify` | Prueba lectura de API, token y persistencia local en MongoDB en memoria. |
+| `npm run verify:api` | Ejecuta verificaciones HTTP contra la API externa y MongoDB en memoria. |
+| `npm run validate` | Comprueba disponibilidad y consistencia del modelo actual. |
 
 ## Datos y sincronización con la API externa
 
 ### Qué datos vienen de cada lugar
 
 La API externa se consulta en modo **solo lectura**. STRflow no cambia en esa
-API los estados de aprobación. MongoDB conserva:
+API los estados de aprobación. MongoDB conserva la referencia `externalId` y
+el país para enlazar cada solicitud con el estado local de STRflow: estado,
+justificación, autor, fecha, tokens, posposición e historial.
 
-1. La copia de los datos operativos recibidos de la API, para poder servir el
-   panel y los enlaces de aprobación.
-2. El estado local de STRflow: `Pendiente`, `Aprobada` o `No Aprobada`.
-3. La justificación, autor, fecha y canal de decisión, además del historial.
-
-No son copias alternativas de la fuente: los campos operativos se actualizan
-desde la API; el estado y la auditoría de aprobación pertenecen a STRflow.
+Los datos operativos (documento, cliente, bodegas, artículos, cantidades y
+fechas) se consultan desde la API por medio del backend. La respuesta se
+mantiene en caché del servidor por un máximo de 15 segundos para reducir
+solicitudes repetidas; los datos operativos no se guardan en MongoDB y la llave
+de la API nunca se expone al navegador.
 
 ### Consulta y transformación
 
@@ -229,40 +221,35 @@ Accept: application/json
 También consulta `var_pais=SV`. La respuesta puede ser un arreglo JSON o
 contenerlo en `data`, `value` o `result`. El servicio agrupa las filas —una por
 artículo/modelo— por país y número de documento. El identificador resultante es
-`{PAIS}-{documento}`, por ejemplo `GT-12345`. Las líneas se guardan como
+`{PAIS}-{documento}`, por ejemplo `GT-12345`. Las líneas se devuelven como
 `items`, con modelo, descripción y cantidad; también se calculan el número de
-líneas y la cantidad total.
+líneas y la cantidad total. Este resultado solo vive en la respuesta del
+backend y no se almacena en MongoDB.
 
 Se interpretan fechas de API en formato día/mes/año con hora opcional y se
 filtran con `SYNC_MIN_DATE`. El listado del dashboard aplica también esa fecha
-mínima, incluso si quedaron registros anteriores en MongoDB; esos datos
-históricos se conservan en la base, pero no aparecen ni se cuentan como
-solicitudes vigentes. Las respuestas de API fallidas quedan en el resumen de
-errores de sincronización. Una respuesta `404` con cuerpo vacío se trata como
-país sin datos; no se usa para inferir que los registros anteriores deben
-borrarse.
+mínima. Si la API falla, el backend devuelve un error y no sustituye los datos
+por una copia antigua de MongoDB. Una respuesta `404` con cuerpo vacío se trata
+como país sin datos.
 
 ### Cómo se conserva el estado local
 
-- **Registro nuevo:** se inserta en MongoDB con `localStatus: "Pendiente"` y
-  sus campos locales iniciales.
-- **Registro ya existente:** los campos operativos de la API se actualizan con
-  un upsert. `localStatus`, notas, tokens e historial quedan fuera de la lista
-  de campos externos y no se sobrescriben.
-- **El traslado desaparece de una respuesta válida:** se marca
-  `missingFromApi` con fecha de ausencia; no se borra el documento ni su
-  decisión. Si vuelve a aparecer, se quita la marca.
-- **La API está caída o responde un error:** se reporta el error; no se marca
-  el país como sincronizado ni se borran decisiones.
+- **Consulta del listado:** los datos se agrupan directamente desde la API y
+  se combinan con el estado local. Una solicitud sin estado guardado se muestra
+  como `Pendiente`, sin crear una copia en MongoDB.
+- **Acción local:** al enviar, posponer, decidir u ocultar una solicitud, se
+  guarda en MongoDB su referencia y únicamente el estado necesario.
+- **Solicitud ausente de la API:** el estado local se conserva, pero no se
+  inventan datos operativos para mostrarla como actual.
+- **La API está caída o responde un error:** el backend informa el fallo; no
+  presenta datos antiguos como si fueran actuales.
 - **Actualización manual de estado desde el panel:** se guarda en MongoDB y se
   agrega una entrada al historial.
 - **Decisión por correo:** al confirmar el enlace, el estado y la justificación
-  se escriben en MongoDB. La sincronización externa posterior los conserva.
+  se escriben en MongoDB. Las consultas futuras de API agregan el estado local.
 
-La sincronización automática se ejecuta al arrancar y cada
-`SYNC_INTERVAL_MINUTES` minutos. El botón **Actualizar** en el panel del gerente
-general dispara una sincronización manual; un gerente regional solo vuelve a
-leer los registros disponibles en su alcance.
+El botón **Actualizar** fuerza una consulta actual a la API. Las lecturas
+normales del panel usan la caché breve del backend.
 
 ## Estados de aprobación
 
@@ -286,7 +273,7 @@ cierra y solicita iniciar sesión otra vez.
 
 | Rol | Acceso |
 |---|---|
-| `GERENTE_GENERAL` | Ve ambos países, filtra por país, administra usuarios y puede sincronizar manualmente. |
+| `GERENTE_GENERAL` | Ve ambos países, filtra por país, administra usuarios y puede actualizar desde la API. |
 | `GERENTE_REGIONAL` | El servidor limita sus consultas y cambios al país asignado (`GT` o `SV`). |
 
 El filtro visual del país no es una barrera de seguridad: el backend aplica el
@@ -296,8 +283,8 @@ enviar otro país.
 ## Aprobación por correo
 
 1. Un usuario autenticado solicita enviar una STR a aprobación.
-2. El servidor obtiene la STR de MongoDB, crea un token aleatorio de un solo uso
-   y guarda solo su hash y expiración.
+2. El servidor consulta la STR actual en la API y guarda su referencia junto
+   con el hash y la expiración de un token aleatorio de un solo uso.
 3. Brevo envía un correo con el detalle, información adicional y enlaces para
    aprobar o rechazar.
 4. El enlace abre una página de confirmación con una breve cuenta regresiva y
@@ -310,11 +297,12 @@ enviar otro país.
 El gerente general abre directamente la bandeja **Aprobaciones** al iniciar
 sesión. Allí ve los datos del traslado y sus artículos, puede aprobar o
 rechazar (con justificación obligatoria al rechazar), o guardarlo para después.
-La sección **Ver facturas** reúne las solicitudes pospuestas de Guatemala y
-El Salvador, aunque las haya pospuesto otro usuario con rol de gerente general;
-cualquier gerente general puede devolverlas a la bandeja. La decisión tomada
-desde el correo o el dashboard se guarda en el mismo registro; al decidir en
-el panel, el enlace pendiente del correo queda invalidado.
+Las solicitudes pospuestas permanecen dentro de **Aprobaciones**, en la sección
+**Para revisar más tarde**. Incluye solicitudes de Guatemala y El Salvador,
+aunque las haya pospuesto otro usuario con rol de gerente general; cualquier
+gerente general puede devolverlas a pendientes. La decisión tomada desde el
+correo o el dashboard se guarda en el mismo registro; al decidir en el panel,
+el enlace pendiente del correo queda invalidado.
 
 Los enlaces caducan según `APPROVAL_TOKEN_TTL_HOURS` y solo pueden usarse una
 vez. `APPROVAL_PUBLIC_URL` debe omitirse en Render para que se use
@@ -348,7 +336,7 @@ Las rutas de solicitudes también aplican el alcance por país.
 | `GET /api/requests` | JWT | Lista con paginación y filtros. |
 | `GET /api/requests/:externalId` | JWT | Obtiene una solicitud dentro del alcance del usuario. |
 | `PATCH /api/requests/:externalId` | JWT | Cambia estado local y/o notas internas. |
-| `POST /api/requests/sync` | JWT + gerente general | Sincroniza países (opcionalmente `{"countries":["GT"]}`). |
+| `POST /api/requests/sync` | JWT + gerente general | Fuerza lectura de países (opcionalmente `{"countries":["GT"]}`); no persiste el payload. |
 | `POST /api/requests/:externalId/send-approval` | JWT | Envía el correo de aprobación. |
 | `POST /api/requests/:externalId/decide-approval` | JWT + gerente general | Aprueba o rechaza una solicitud enviada; invalida el enlace del correo. |
 | `POST /api/requests/:externalId/defer-approval` | JWT + gerente general | Guarda la solicitud para revisarla después. |
@@ -384,16 +372,17 @@ La base se llama `strflow` por defecto. Colecciones principales:
 
 ### `requests`
 
-Un documento por solicitud, identificada con `externalId` (`GT-...` o
-`SV-...`). Contiene:
+Un documento solo cuando existe estado local, identificado con `externalId`
+(`GT-...` o `SV-...`). Contiene:
 
-- Campos sincronizados desde la API: documento, país, fecha, cliente, bodegas,
-  tipo, líneas de artículos, cantidades y datos crudos de origen.
-- Estado local: `localStatus`, notas, indicador de oculto y marca de ausencia
-  de la API.
+- Referencia a la API: `externalId` y país.
+- Estado local: `localStatus`, notas e indicador de oculto.
 - Auditoría: fecha, autor, canal e historial de decisiones.
 - Aprobación: destinatario y hash/fechas del token. El token plano no se guarda.
 - Integración SAP: estado y respuesta informativa; no incluye contraseñas.
+
+Al arrancar, el servidor elimina de documentos antiguos los campos operativos
+de la API, preservando estados, historial, tokens y referencias.
 
 ### `users`
 
@@ -430,11 +419,11 @@ La URI local `mongodb://127.0.0.1:27017` apunta a la computadora y no a Atlas.
    `BREVO_EDUARDO_EMAIL`, `BREVO_SENDER_EMAIL` y las contraseñas
    `AUTH_GLOBAL_PASSWORD`, `AUTH_GUATEMALA_PASSWORD`,
    `AUTH_ELSALVADOR_PASSWORD`.
-5. Revisa también `MONGODB_DB=strflow`, `JWT_SECRET` (generada por Blueprint),
-   `SYNC_INTERVAL_MINUTES` y `SYNC_MIN_DATE`.
+5. Revisa también `MONGODB_DB=strflow`, `JWT_SECRET` (generada por Blueprint)
+   y `SYNC_MIN_DATE`.
 6. Guarda los cambios y espera a que el deploy aparezca como **Live**.
-7. Revisa los logs: debe indicar conexión a MongoDB, cuentas aprovisionadas y
-   el resultado de sincronización. No es necesario ejecutar `npm run setup` en
+7. Revisa los logs: debe indicar conexión a MongoDB y cuentas aprovisionadas.
+   No es necesario ejecutar `npm run setup` en
    Shell para crear las cuentas: el servidor las aprovisiona al arrancar.
 8. Inicia sesión con los correos configurados y sus contraseñas de Render.
 
@@ -443,9 +432,8 @@ también `MONGODB_URI` en Render. El `.env` local no se copia automáticamente a
 Render.
 
 En el plan gratuito de Render, el servicio puede suspenderse tras un período sin
-tráfico. Mientras está dormido no ejecuta la sincronización periódica; al
-despertar vuelve a arrancar y hace una sincronización inicial. Para ejecución
-continua, se necesita un plan que no suspenda el servicio.
+tráfico. Al despertar, las solicitudes vuelven a consultarse desde la API
+externa; no se necesita una sincronización en segundo plano.
 
 ## Diagnóstico
 
@@ -453,13 +441,13 @@ continua, se necesita un plan que no suspenda el servicio.
 |---|---|
 | Login devuelve `401` | Que el correo y la variable `AUTH_*_PASSWORD` correspondan, que Render esté en **Live** y que sus logs indiquen `[users] cuenta lista: ...`. Verifica que `MONGODB_URI` apunta a la base correcta. |
 | `[users] omitido ...` en logs | Falta la variable de contraseña para esa cuenta o está vacía en Render. |
-| No aparecen solicitudes | Revisa `EXTERNAL_API_KEY`, `EXTERNAL_API_URL`, `SYNC_MIN_DATE` y errores `[sync]` en logs. Ejecuta `npm run audit` contra la misma base/API para comparar. |
+| No aparecen solicitudes | Revisa `EXTERNAL_API_KEY`, `EXTERNAL_API_URL`, `SYNC_MIN_DATE` y errores de API en logs. Ejecuta `npm run audit` para comparar API y referencias de estado. |
 | Correo no sale | Revisa el log de arranque `[mailer] Variables requeridas`: solo indica `presente` o `FALTA`, nunca muestra valores secretos. Si faltan variables, agrégalas en **Environment del servicio correcto de Render** y vuelve a desplegar; si aparecen presentes, revisa el detalle HTTP que devuelve Brevo y que el remitente esté verificado. |
 | Enlace de correo usa localhost | Quita `APPROVAL_PUBLIC_URL` de Render o pon la URL pública correcta; normalmente se recomienda omitirla y usar `RENDER_EXTERNAL_URL`. |
 | Compass muestra `ECONNREFUSED 127.0.0.1:27017` | Compass está conectado al Mongo local. Crea/usa una conexión a Atlas con la URI del clúster. |
 | Compass muestra `bad auth` | Revisa el usuario/contraseña de **Database Access**, reemplaza credenciales guardadas en Compass y codifica caracteres especiales de la contraseña en la URI. |
 | Compass conecta pero no se ven datos de Render | Comprueba que Compass y Render usen el mismo clúster en Atlas y que la base se llame `strflow`. |
-| Una STR desapareció de la API | Se conserva en Mongo con `missingFromApi`; la sincronización no borra su estado local. |
+| Una STR desapareció de la API | MongoDB conserva solo su estado local; los datos operativos dejan de mostrarse como actuales. |
 
 En reportes de errores, comparte mensajes y logs redactados. Nunca incluyas
 contraseñas, `MONGODB_URI`, JWT, API keys ni el contenido de `.env`.

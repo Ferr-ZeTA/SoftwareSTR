@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { Request, LOCAL_STATUS } from '../models/Request.js'
+import { Request, LOCAL_DEFAULTS, LOCAL_STATUS } from '../models/Request.js'
 
 const TOKEN_TTL_HOURS = Number(process.env.APPROVAL_TOKEN_TTL_HOURS || 72)
 // Segundos que la pagina ofrece para deshacer. Se dan 5 extra de margen en
@@ -25,21 +25,27 @@ export async function invalidateApprovalToken(externalId, token) {
 
 // Genera un token de un solo uso. Devuelve el token plano (solo para el correo);
 // en la DB queda únicamente el hash, así que el ID nunca viaja en la URL.
-export async function issueApprovalToken(externalId, sentTo = null) {
+export async function issueApprovalToken(source, sentTo = null) {
+  const externalId = typeof source === 'string' ? source : source.externalId
   const token = crypto.randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + TOKEN_TTL_HOURS * 3600_000)
 
+  const update = {
+    $set: {
+      approvalTokenHash: hashToken(token),
+      approvalTokenExpiresAt: expiresAt,
+      approvalTokenUsedAt: null,
+      approvalSentTo: sentTo,
+    },
+  }
+  if (typeof source !== 'string') {
+    update.$setOnInsert = { ...LOCAL_DEFAULTS, externalId, country: source.country }
+    for (const field of Object.keys(update.$set)) delete update.$setOnInsert[field]
+  }
   const updated = await Request.findOneAndUpdate(
     { externalId, deletedLocally: false },
-    {
-      $set: {
-        approvalTokenHash: hashToken(token),
-        approvalTokenExpiresAt: expiresAt,
-        approvalTokenUsedAt: null,
-        approvalSentTo: sentTo,
-      },
-    },
-    { returnDocument: 'after' },
+    update,
+    { returnDocument: 'after', upsert: typeof source !== 'string', setDefaultsOnInsert: true },
   )
   if (!updated) return null
   return { token, expiresAt, request: updated }

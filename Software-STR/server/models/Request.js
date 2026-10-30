@@ -14,31 +14,11 @@ export const SAP_PUSH_STATUS = {
   FALLIDO: 'fallido',
 }
 
-// Una línea del traslado. Llega de la API; se reemplaza completa en cada sync.
-const itemSchema = new mongoose.Schema(
-  {
-    modelo: { type: String, default: '' },
-    descripcion: { type: String, default: '' },
-    cantidad: { type: Number, default: 0 },
-  },
-  { _id: false },
-)
-
-// --- Campos de la API externa (GET). La sync los sobreescribe siempre. ---
-const externalFields = {
+// La API conserva los datos operativos; solo se guarda su identificador para
+// enlazar decisiones locales con la solicitud externa correspondiente.
+const referenceFields = {
   externalId: { type: String, required: true, unique: true, index: true },
-  documento: { type: String, required: true },
   country: { type: String, enum: ['GT', 'SV'], required: true, index: true },
-  fecha: { type: Date, default: null },
-  clienteCodigo: { type: String, default: '' },
-  clienteNombre: { type: String, default: '' },
-  bodegaOrigen: { type: String, default: '' },
-  bodegaDestino: { type: String, default: '' },
-  tipoSolicitud: { type: String, default: '' },
-  items: { type: [itemSchema], default: [] },
-  totalLineas: { type: Number, default: 0 },
-  totalCantidad: { type: Number, default: 0 },
-  raw: { type: mongoose.Schema.Types.Mixed, default: [] },
 }
 
 // Una entrada del historial de decisiones. Solo se agrega, nunca se edita.
@@ -54,7 +34,7 @@ const decisionSchema = new mongoose.Schema(
   { _id: false },
 )
 
-// --- Campos de control local. La sync NUNCA los toca. ---
+// Estado de aprobacion, posposicion, auditoria y envio a SAP.
 const localFields = {
   localStatus: {
     type: String,
@@ -75,11 +55,6 @@ const localFields = {
   approvalDeferredAt: { type: Date, default: null },
   approvalDeferredBy: { type: String, default: null },
   approvalHistory: { type: [decisionSchema], default: [] },
-  // La API dejo de devolver este traslado. No se borra (perderiamos la
-  // decision local), se marca para que la divergencia sea visible.
-  missingFromApi: { type: Boolean, default: false, index: true },
-  missingSince: { type: Date, default: null },
-  lastSyncedAt: { type: Date, default: null },
   // --- Escritura de la decision en SAP ---
   // Resultado de registrar la decision en SAP. La llamada es sincronica: pasa
   // al enviar el formulario del correo, asi que esto es constancia de lo que
@@ -98,17 +73,13 @@ const localFields = {
 }
 
 const requestSchema = new mongoose.Schema(
-  { ...externalFields, ...localFields },
-  { timestamps: true },
+  { ...referenceFields, ...localFields },
+  { timestamps: true, strict: true },
 )
 
-requestSchema.index({ country: 1, fecha: -1 })
 requestSchema.index({ country: 1, deletedLocally: 1, localStatus: 1 })
 
-// Lista blanca que usa el servicio de sincronización para construir el $set.
-export const EXTERNAL_FIELD_NAMES = Object.keys(externalFields)
-
-// Valores locales iniciales: solo en $setOnInsert.
+// Estado inicial de una referencia que aun no tiene decisiones locales.
 export const LOCAL_DEFAULTS = {
   localStatus: LOCAL_STATUS.PENDIENTE,
   internalNotes: '',
@@ -128,12 +99,6 @@ export const LOCAL_DEFAULTS = {
   sapPushError: null,
   sapPushCode: null,
   sapAuthorizedBy: null,
-  missingFromApi: false,
-  missingSince: null,
-  revertTokenHash: null,
-  revertTokenExpiresAt: null,
-  revertTokenUsedAt: null,
-  revertToStatus: null,
 }
 
 export const Request = mongoose.model('Request', requestSchema)

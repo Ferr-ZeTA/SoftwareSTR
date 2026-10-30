@@ -2,14 +2,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import mongoose from 'mongoose'
 import { MongoMemoryServer } from 'mongodb-memory-server'
-import { Request, SAP_PUSH_STATUS } from '../models/Request.js'
+import { Request } from '../models/Request.js'
 import { syncExternalApi } from './syncExternalApi.js'
 
 let mongo
 
 beforeAll(async () => {
   mongo = await MongoMemoryServer.create()
-  await mongoose.connect(mongo.getUri(), { dbName: 'strflow_external_sync_test' })
+  await mongoose.connect(mongo.getUri(), { dbName: 'strflow_external_api_test' })
 })
 
 afterEach(async () => {
@@ -22,14 +22,11 @@ afterAll(async () => {
 })
 
 describe('syncExternalApi', () => {
-  it('updates API-owned data without overwriting local decision or history', async () => {
+  it('returns live API requests without overwriting or storing operational data', async () => {
     const decidedAt = new Date('2026-10-20T12:00:00.000Z')
     await Request.create({
       externalId: 'GT-7001',
-      documento: '7001',
       country: 'GT',
-      fecha: new Date('2026-10-21T00:00:00.000Z'),
-      clienteNombre: 'Nombre anterior',
       localStatus: 'Aprobada',
       internalNotes: 'Nota local que debe conservarse',
       approvalDecidedAt: decidedAt,
@@ -43,47 +40,47 @@ describe('syncExternalApi', () => {
         at: decidedAt,
         note: 'Autorizado',
       }],
-      sapPushStatus: SAP_PUSH_STATUS.NO_APLICA,
     })
 
-    const summary = await syncExternalApi({
+    const result = await syncExternalApi({
       countries: ['GT'],
       fetcher: async () => [{
         documento: '7001',
         fecha: '24/10/2026',
         cliente: 'CLI-7001',
-        nombre: 'Nombre actualizado desde API',
+        nombre: 'Nombre recibido de API',
         bodegaorigen: 'Bodega A',
         bodegadestino: 'Bodega B',
         tiposolicitud: 'COM',
         modelo: 'M-1',
-        descripcion: 'Producto actualizado',
+        descripcion: 'Producto de API',
         cantidad: '4',
       }],
     })
     const saved = await Request.findOne({ externalId: 'GT-7001' }).lean()
 
-    expect(summary.errors).toEqual([])
-    expect(saved).toMatchObject({
+    expect(result.errors).toEqual([])
+    expect(result.requests).toHaveLength(1)
+    expect(result.requests[0]).toMatchObject({
+      externalId: 'GT-7001',
       clienteCodigo: 'CLI-7001',
-      clienteNombre: 'Nombre actualizado desde API',
+      clienteNombre: 'Nombre recibido de API',
+      items: [{ modelo: 'M-1', descripcion: 'Producto de API', cantidad: 4 }],
+    })
+    expect(saved).toMatchObject({
+      country: 'GT',
       localStatus: 'Aprobada',
       internalNotes: 'Nota local que debe conservarse',
       approvalDecidedBy: 'gerente@example.com',
-      sapPushStatus: SAP_PUSH_STATUS.NO_APLICA,
     })
     expect(saved.approvalDecidedAt.toISOString()).toBe(decidedAt.toISOString())
     expect(saved.approvalHistory).toHaveLength(1)
-    expect(saved.approvalHistory[0].note).toBe('Autorizado')
-    expect(saved.items).toEqual([{
-      modelo: 'M-1',
-      descripcion: 'Producto actualizado',
-      cantidad: 4,
-    }])
+    expect(saved).not.toHaveProperty('clienteNombre')
+    expect(saved).not.toHaveProperty('items')
   })
 
-  it('inserts a newly received API request as pending', async () => {
-    await syncExternalApi({
+  it('does not create MongoDB records for new API requests', async () => {
+    const result = await syncExternalApi({
       countries: ['SV'],
       fetcher: async () => [{
         documento: '8001',
@@ -95,12 +92,7 @@ describe('syncExternalApi', () => {
       }],
     })
 
-    const saved = await Request.findOne({ externalId: 'SV-8001' }).lean()
-    expect(saved).toMatchObject({
-      localStatus: 'Pendiente',
-      approvalHistory: [],
-      deletedLocally: false,
-      missingFromApi: false,
-    })
+    expect(result.requests.map((item) => item.externalId)).toEqual(['SV-8001'])
+    expect(await Request.countDocuments({})).toBe(0)
   })
 })

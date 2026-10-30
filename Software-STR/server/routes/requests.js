@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { Request, LOCAL_STATUS, SAP_PUSH_STATUS } from '../models/Request.js'
+import { Request, LOCAL_DEFAULTS, LOCAL_STATUS, SAP_PUSH_STATUS } from '../models/Request.js'
 import { ROLES } from '../models/User.js'
 import { authenticate, enforceScope, requireRole } from '../middleware/auth.js'
 import {
@@ -9,12 +9,29 @@ import {
 import {
   sendApprovalEmail, getBrevoConfigError, escapeHtml,
 } from '../services/mailer.js'
-import { MIN_DATE, syncExternalApi } from '../services/syncExternalApi.js'
+import {
+  getExternalRequest, getExternalRequests, MIN_DATE, syncExternalApi,
+} from '../services/syncExternalApi.js'
 import { authorizeInSap } from '../services/sapApproval.js'
 
 export const requestsRouter = Router()
 
-const LIST_PROJECTION = '-raw -approvalTokenHash'
+const LOCAL_PROJECTION = '-approvalTokenHash'
+
+function combineRequest(external, local) {
+  const state = local?.toObject ? local.toObject() : local
+  const combined = { ...external, ...LOCAL_DEFAULTS, ...(state || {}) }
+  delete combined.approvalTokenHash
+  return combined
+}
+
+async function ensureLocalState(external) {
+  return Request.findOneAndUpdate(
+    { externalId: external.externalId },
+    { $setOnInsert: { ...LOCAL_DEFAULTS, externalId: external.externalId, country: external.country } },
+    { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
+  )
+}
 
 // Motivos por los que un enlace del correo deja de servir.
 const LINK_ERRORS = {
@@ -176,8 +193,12 @@ requestsRouter.get('/approve', async (request, response) => {
       .send(resultPage(false, 'Enlace no valido', LINK_ERRORS[reason]))
   }
 
+  const external = await getExternalRequest(result.request.externalId)
+  if (!external) {
+    return response.status(404).send(resultPage(false, 'Solicitud no disponible', 'Ya no aparece en la API externa.'))
+  }
   return response.send(approvalGatePage({
-    request: result.request,
+    request: combineRequest(external, result.request),
     status,
     token,
     seconds: REVERT_WINDOW_SECONDS,
@@ -201,14 +222,28 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
       .send(resultPage(false, 'Enlace no valido', LINK_ERRORS[reason]))
   }
 
+  const external = await getExternalRequest(peeked.request.externalId)
+  if (!external) {
+    return response.status(404).send(resultPage(false, 'Solicitud no disponible', 'Ya no aparece en la API externa.'))
+  }
+  const approvalRequest = combineRequest(external, peeked.request)
+  if (status === LOCAL_STATUS.NO_APROBADA && !String(motivo).trim()) {
+    return response.status(400).send(approvalGatePage({
+      request: approvalRequest,
+      status,
+      token,
+      seconds: REVERT_WINDOW_SECONDS,
+      error: 'Escribe una justificación para rechazar la solicitud.',
+    }))
+  }
   const sap = await authorizeInSap({
-    request: peeked.request, status, motivo,
+    request: approvalRequest, status, motivo,
   })
 
   if (!sap.ok) {
     // Se devuelve el formulario con la justificacion. El token sigue sirviendo.
     return response.status(sap.retryable ? 400 : 502).send(approvalGatePage({
-      request: peeked.request, status, token, seconds: REVERT_WINDOW_SECONDS,
+      request: approvalRequest, status, token, seconds: REVERT_WINDOW_SECONDS,
       error: sap.message, motivo,
     }))
   }
@@ -227,7 +262,7 @@ requestsRouter.post('/approve/confirm', async (request, response) => {
   return response.send(resultPage(
     true,
     status === LOCAL_STATUS.APROBADA ? 'Traslado aprobado' : 'Traslado rechazado',
-    `El traslado <strong>${escapeHtml(result.request.documento)}</strong> quedo como `
+    `El traslado <strong>${escapeHtml(external.documento)}</strong> quedo como `
     + `<strong>${escapeHtml(status)}</strong>. ${escapeHtml(sap.message)}`,
   ))
 })
@@ -247,8 +282,18 @@ requestsRouter.use(authenticate, enforceScope)
 // Sincronizacion manual. Va antes de /:externalId para no colisionar.
 requestsRouter.post('/sync', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
   const countries = Array.isArray(request.body?.countries) ? request.body.countries : undefined
-  const summary = await syncExternalApi({ countries })
-  response.status(summary.errors.length ? 207 : 200).json(summary)
+  if (countries && countries.some((country) => !['GT', 'SV'].includes(country))) {
+    return response.status(400).json({ error: 'El país debe ser GT o SV.' })
+  }
+  const summary = await syncExternalApi({ countries, force: true })
+  if (summary.errors.length) return response.status(502).json({ error: summary.errors.map((item) => item.message).join('; ') })
+  response.json({
+    rows: summary.rows,
+    documents: summary.documents,
+    skippedByDate: summary.skippedByDate,
+    minDate: summary.minDate,
+    durationMs: summary.durationMs,
+  })
 })
 
 requestsRouter.get('/', async (request, response) => {
@@ -256,47 +301,54 @@ requestsRouter.get('/', async (request, response) => {
   const page = Math.max(1, Number(request.query.page) || 1)
   const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50))
 
-  const filter = {
-    deletedLocally: false,
-    fecha: { $gte: new Date(MIN_DATE) },
+  if (country && !['GT', 'SV'].includes(String(country))) {
+    return response.status(400).json({ error: 'El país debe ser GT o SV.' })
   }
-  if (status) filter.localStatus = String(status)
-  if (tipo) filter.tipoSolicitud = String(tipo)
-  if (country) filter.country = String(country)
-  if (from) {
-    const requestedFrom = new Date(String(from))
-    filter.fecha.$gte = requestedFrom > MIN_DATE ? requestedFrom : new Date(MIN_DATE)
+  if ([from, to].some((value) => value && Number.isNaN(new Date(String(value)).getTime()))) {
+    return response.status(400).json({ error: 'El rango de fechas no es válido.' })
   }
-  if (to) filter.fecha.$lte = new Date(String(to))
-  if (search) {
-    const term = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
-    filter.$or = [
-      { documento: term }, { clienteNombre: term },
-      { clienteCodigo: term }, { 'items.descripcion': term },
-    ]
-  }
-  // El scope se aplica al final: un ?country= del cliente no puede sacar
-  // a un GERENTE_REGIONAL de su pais.
-  Object.assign(filter, request.scope)
 
-  const [data, total] = await Promise.all([
-    Request.find(filter).select(LIST_PROJECTION)
-      .sort({ fecha: -1, documento: -1 })
-      .skip((page - 1) * limit).limit(limit).lean(),
-    Request.countDocuments(filter),
-  ])
-
+  const scopedCountry = request.scope.country || (country ? String(country) : null)
+  if (country && scopedCountry && String(country) !== scopedCountry) {
+    return response.json({ data: [], total: 0, page, limit, pages: 0 })
+  }
+  const countries = scopedCountry ? [scopedCountry] : ['GT', 'SV']
+  const external = await getExternalRequests(countries)
+  const localRecords = await Request.find({
+    externalId: { $in: external.map((item) => item.externalId) },
+  }).select(LOCAL_PROJECTION).lean()
+  const localById = new Map(localRecords.map((item) => [item.externalId, item]))
+  const searchTerm = search
+    ? new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+    : null
+  const fromDate = from ? new Date(String(from)) : MIN_DATE
+  const toDate = to ? new Date(String(to)) : null
+  const filtered = external.map((item) => combineRequest(item, localById.get(item.externalId)))
+    .filter((item) => !item.deletedLocally)
+    .filter((item) => !status || item.localStatus === String(status))
+    .filter((item) => !tipo || item.tipoSolicitud === String(tipo))
+    .filter((item) => !fromDate || item.fecha >= (fromDate > MIN_DATE ? fromDate : MIN_DATE))
+    .filter((item) => !toDate || item.fecha <= toDate)
+    .filter((item) => !searchTerm || [
+      item.documento, item.clienteNombre, item.clienteCodigo,
+      ...item.items.map((line) => line.descripcion),
+    ].some((value) => searchTerm.test(value)))
+    .sort((left, right) => right.fecha - left.fecha || right.documento.localeCompare(left.documento))
+  const total = filtered.length
+  const data = filtered.slice((page - 1) * limit, page * limit)
   response.json({ data, total, page, limit, pages: Math.ceil(total / limit) })
 })
 
 requestsRouter.get('/:externalId', async (request, response) => {
-  const found = await Request.findOne({
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external || (request.scope.country && external.country !== request.scope.country)) {
+    return response.status(404).json({ error: 'Solicitud no encontrada en la API externa.' })
+  }
+  const local = await Request.findOne({
     externalId: request.params.externalId,
-    deletedLocally: false,
-    ...request.scope,
-  }).select('-approvalTokenHash').lean()
-  if (!found) return response.status(404).json({ error: 'Solicitud no encontrada.' })
-  response.json(found)
+  }).select(LOCAL_PROJECTION).lean()
+  if (local?.deletedLocally) return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  response.json(combineRequest(external, local))
 })
 
 requestsRouter.post('/:externalId/decide-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
@@ -336,21 +388,25 @@ requestsRouter.post('/:externalId/decide-approval', requireRole(ROLES.GERENTE_GE
         note: String(note).trim().slice(0, 5000),
       },
     },
-  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+  }, { returnDocument: 'after' }).select(LOCAL_PROJECTION)
 
   if (!updated) {
     return response.status(409).json({ error: 'La solicitud ya fue decidida o no está pendiente de aprobación.' })
   }
-  response.json(updated)
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external) return response.status(404).json({ error: 'Solicitud ya no disponible en la API externa.' })
+  response.json(combineRequest(external, updated))
 })
 
 // Solo campos locales: la API externa sigue siendo la duena del resto.
 requestsRouter.patch('/:externalId', async (request, response) => {
   const filter = { externalId: request.params.externalId, deletedLocally: false, ...request.scope }
-  const current = await Request.findOne(filter)
-    .select('localStatus approvalTokenUsedAt approvalSentTo')
-    .lean()
-  if (!current) return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external || (request.scope.country && external.country !== request.scope.country)) {
+    return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  }
+  const current = await ensureLocalState(external)
+  if (!current || current.deletedLocally) return response.status(404).json({ error: 'Solicitud no encontrada.' })
 
   const update = {}
   const push = {}
@@ -392,13 +448,13 @@ requestsRouter.patch('/:externalId', async (request, response) => {
   if (push.approvalHistory) updateFilter.localStatus = current.localStatus
   const updated = await Request.findOneAndUpdate(updateFilter, mutation, {
     returnDocument: 'after',
-  }).select(LIST_PROJECTION)
+  }).select(LOCAL_PROJECTION)
   if (!updated) {
     return response.status(push.approvalHistory ? 409 : 404).json({
       error: push.approvalHistory ? 'La solicitud ya fue decidida.' : 'Solicitud no encontrada.',
     })
   }
-  response.json(updated)
+  response.json(combineRequest(external, updated))
 })
 
 requestsRouter.post('/:externalId/defer-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
@@ -414,12 +470,13 @@ requestsRouter.post('/:externalId/defer-approval', requireRole(ROLES.GERENTE_GEN
       approvalDeferredAt: new Date(),
       approvalDeferredBy: request.user.email,
     },
-  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+  }, { returnDocument: 'after'   }).select(LOCAL_PROJECTION)
 
   if (!updated) {
     return response.status(404).json({ error: 'No se encontró una solicitud pendiente enviada a aprobación.' })
   }
-  response.json(updated)
+  const external = await getExternalRequest(request.params.externalId)
+  response.json(combineRequest(external, updated))
 })
 
 requestsRouter.post('/:externalId/restore-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
@@ -431,16 +488,22 @@ requestsRouter.post('/:externalId/restore-approval', requireRole(ROLES.GERENTE_G
     ...request.scope,
   }, {
     $set: { approvalDeferredAt: null, approvalDeferredBy: null },
-  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+  }, { returnDocument: 'after'   }).select(LOCAL_PROJECTION)
 
   if (!updated) {
     return response.status(404).json({ error: 'No se encontró una solicitud pospuesta por este usuario.' })
   }
-  response.json(updated)
+  const external = await getExternalRequest(request.params.externalId)
+  response.json(combineRequest(external, updated))
 })
 
-// Borrado local (bandera). El registro sobrevive a la siguiente sincronizacion.
+// Borrado local: se oculta la solicitud sin persistir sus datos operativos.
 requestsRouter.delete('/:externalId', async (request, response) => {
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external || (request.scope.country && external.country !== request.scope.country)) {
+    return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  }
+  await ensureLocalState(external)
   const updated = await Request.findOneAndUpdate(
     { externalId: request.params.externalId, ...request.scope },
     { $set: { deletedLocally: true } },
@@ -451,6 +514,11 @@ requestsRouter.delete('/:externalId', async (request, response) => {
 })
 
 requestsRouter.post('/:externalId/restore', async (request, response) => {
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external || (request.scope.country && external.country !== request.scope.country)) {
+    return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  }
+  await ensureLocalState(external)
   const updated = await Request.findOneAndUpdate(
     { externalId: request.params.externalId, ...request.scope },
     { $set: { deletedLocally: false } },
@@ -477,22 +545,21 @@ requestsRouter.post('/:externalId/send-approval', async (request, response) => {
     return response.status(503).json({ error: configError })
   }
 
-  const target = await Request.findOne({
-    externalId: request.params.externalId,
-    deletedLocally: false,
-    localStatus: LOCAL_STATUS.PENDIENTE,
-    ...request.scope,
-  }).select('externalId')
-  if (!target) {
+  const external = await getExternalRequest(request.params.externalId)
+  if (!external || (request.scope.country && external.country !== request.scope.country)) {
+    return response.status(404).json({ error: 'Solicitud no encontrada en la API externa.' })
+  }
+  const target = await ensureLocalState(external)
+  if (target.deletedLocally || target.localStatus !== LOCAL_STATUS.PENDIENTE) {
     return response.status(404).json({ error: 'Solo se pueden enviar solicitudes pendientes a aprobación.' })
   }
 
-  const issued = await issueApprovalToken(target.externalId, process.env.BREVO_EDUARDO_EMAIL)
+  const issued = await issueApprovalToken(external, process.env.BREVO_EDUARDO_EMAIL)
   if (!issued) return response.status(404).json({ error: 'Solicitud no encontrada.' })
 
   try {
     const sent = await sendApprovalEmail({
-      request: issued.request,
+      request: combineRequest(external, issued.request),
       token: issued.token,
       additionalInfo: request.body?.additionalInfo,
     })
