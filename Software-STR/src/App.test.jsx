@@ -71,6 +71,11 @@ function rowIds() {
   return rows.map((row) => within(row).getAllByRole('cell')[0].textContent)
 }
 
+async function openRequests(user) {
+  await user.click(screen.getByRole('link', { name: /Solicitudes STR/ }))
+  await screen.findByText(/Mostrando/)
+}
+
 describe('paginación de la tabla', () => {
   beforeEach(() => {
     STRS.forEach((str) => {
@@ -92,7 +97,7 @@ describe('paginación de la tabla', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await screen.findByText(/Mostrando/)
+    await openRequests(user)
     expect(rowIds()).toHaveLength(10)
     expect(rowIds()[0]).toContain('GT-1001')
 
@@ -119,7 +124,7 @@ describe('paginación de la tabla', () => {
   it('retrocede y salta por número de página', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequests(user)
 
     await user.click(screen.getByRole('button', { name: '3' }))
     expect(rowIds()[0]).toContain('GT-1021')
@@ -134,7 +139,7 @@ describe('paginación de la tabla', () => {
   it('vuelve a la página 1 al filtrar', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequests(user)
 
     await user.click(screen.getByLabelText('Página siguiente'))
     expect(rowIds()[0]).toContain('GT-1011')
@@ -147,7 +152,7 @@ describe('paginación de la tabla', () => {
   it('filtra por país en la vista general y actualiza conteos y resultados', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequests(user)
 
     await user.selectOptions(screen.getByLabelText('Filtrar por país'), 'SV')
 
@@ -164,9 +169,8 @@ describe('paginación de la tabla', () => {
     STRS[0].items = [{ modelo: 'M-1', descripcion: 'Producto de prueba', cantidad: 5 }]
     render(<App />)
 
-    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
-
     expect(await screen.findByRole('heading', { name: /Solicitudes de aprobación/ })).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Aprobaciones/ }).className).toContain('active')
     expect(screen.getByText('Producto de prueba')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: /Aprobar/ }))
 
@@ -174,12 +178,14 @@ describe('paginación de la tabla', () => {
     expect(await screen.findByText(/No tienes aprobaciones pendientes/)).toBeTruthy()
   })
 
-  it('guarda las solicitudes pospuestas en Ver facturas y permite devolverlas a la bandeja', async () => {
+  it('muestra en Ver facturas las solicitudes pospuestas de ambos países', async () => {
     const user = userEvent.setup()
     STRS[0].aprobacionEnviada = true
+    STRS[1].aprobacionEnviada = true
+    STRS[1].aprobacionPospuestaEn = new Date().toISOString()
+    STRS[1].aprobacionPospuestaPor = 'otra-persona@red.com'
     render(<App />)
 
-    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
     await screen.findByRole('heading', { name: /Solicitudes de aprobación/ })
     await user.click(screen.getByRole('button', { name: /Ver más tarde/ }))
     expect(deferApproval).toHaveBeenCalledWith('GT-1001')
@@ -187,7 +193,8 @@ describe('paginación de la tabla', () => {
     await user.click(screen.getByRole('link', { name: /Ver facturas/ }))
     expect(await screen.findByRole('heading', { name: 'Ver facturas' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /GT-1001/ })).toBeTruthy()
-    await user.click(screen.getByRole('button', { name: /Regresar a aprobaciones/ }))
+    expect(screen.getByRole('heading', { name: /SV-1002/ })).toBeTruthy()
+    await user.click(screen.getAllByRole('button', { name: /Regresar a aprobaciones/ })[0])
     expect(restoreApproval).toHaveBeenCalledWith('GT-1001')
     await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
     expect(await screen.findByRole('button', { name: /Ver más tarde/ })).toBeTruthy()
@@ -199,7 +206,7 @@ describe('paginación de la tabla', () => {
       new Error('Brevo rechazó el envío (HTTP 400): sender is not verified'),
     )
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequests(user)
 
     await user.click(screen.getAllByRole('button', { name: /Aprobación/ })[0])
     await user.click(screen.getByRole('button', { name: /Enviar a gerente/ }))

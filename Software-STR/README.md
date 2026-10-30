@@ -304,13 +304,14 @@ enviar otro país.
 6. El frontend consulta periódicamente las solicitudes para detectar cambios
    hechos por correo y mostrar una notificación.
 
-El gerente general también puede revisar las solicitudes enviadas desde la
-opción **Aprobaciones** del dashboard. Allí ve los datos del traslado y sus
-artículos, puede aprobar o rechazar (con justificación obligatoria al
-rechazar), o guardarlo para después. Las solicitudes pospuestas aparecen en
-**Ver facturas** y pueden regresar a la bandeja. La decisión tomada desde el
-correo o el dashboard se guarda en el mismo registro; al decidir en el panel,
-el enlace pendiente del correo queda invalidado.
+El gerente general abre directamente la bandeja **Aprobaciones** al iniciar
+sesión. Allí ve los datos del traslado y sus artículos, puede aprobar o
+rechazar (con justificación obligatoria al rechazar), o guardarlo para después.
+La sección **Ver facturas** reúne las solicitudes pospuestas de Guatemala y
+El Salvador, aunque las haya pospuesto otro usuario con rol de gerente general;
+cualquier gerente general puede devolverlas a la bandeja. La decisión tomada
+desde el correo o el dashboard se guarda en el mismo registro; al decidir en
+el panel, el enlace pendiente del correo queda invalidado.
 
 Los enlaces caducan según `APPROVAL_TOKEN_TTL_HOURS` y solo pueden usarse una
 vez. `APPROVAL_PUBLIC_URL` debe omitirse en Render para que se use

@@ -57,7 +57,7 @@ function managerHeaders() {
   return { Authorization: `Bearer ${token}` }
 }
 
-describe('aprobacion por correo', () => {
+describe('aprobacion por correo y dashboard', () => {
   it('muestra solo la justificacion como campo editable', async () => {
     const issued = await createPendingRequest()
     const response = await fetch(
@@ -141,6 +141,10 @@ describe('aprobacion por correo', () => {
       headers,
     })
     const deferredRequest = await Request.findOne({ externalId: 'GT-approval-test' }).lean()
+    await Request.updateOne(
+      { externalId: 'GT-approval-test' },
+      { $set: { approvalDeferredBy: 'otra-persona@example.com' } },
+    )
     const restored = await fetch(`${base}/api/requests/GT-approval-test/restore-approval`, {
       method: 'POST',
       headers,

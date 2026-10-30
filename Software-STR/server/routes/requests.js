@@ -425,7 +425,6 @@ requestsRouter.post('/:externalId/restore-approval', requireRole(ROLES.GERENTE_G
     deletedLocally: false,
     localStatus: LOCAL_STATUS.PENDIENTE,
     approvalSentTo: { $ne: null },
-    approvalDeferredBy: request.user.email,
     ...request.scope,
   }, {
     $set: { approvalDeferredAt: null, approvalDeferredBy: null },

@@ -789,7 +789,14 @@ function App() {
   const [detailSTR, setDetailSTR] = useState(null)
   const [approvalSTR, setApprovalSTR] = useState(null)
   const [showUsers, setShowUsers] = useState(false)
-  const [activeView, setActiveView] = useState('requests')
+  const [activeView, setActiveView] = useState(() => {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem('strflow-user'))
+      return savedUser?.role === 'GERENTE_GENERAL' ? 'approvals' : 'requests'
+    } catch {
+      return 'requests'
+    }
+  })
   const [processingApprovalId, setProcessingApprovalId] = useState('')
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('strflow-sidebar') === 'collapsed' } catch { return false }
@@ -813,6 +820,7 @@ function App() {
     const authenticatedUser = await login(email, password)
     localStorage.setItem('strflow-user', JSON.stringify(authenticatedUser))
     setUser(authenticatedUser)
+    setActiveView(authenticatedUser.role === 'GERENTE_GENERAL' ? 'approvals' : 'requests')
     await reload()
   }
 
@@ -830,7 +838,6 @@ function App() {
     str.aprobacionEnviada
     && str.estado === 'Pendiente'
     && str.aprobacionPospuestaEn
-    && str.aprobacionPospuestaPor === user?.email
   ))
   const countryScopedSTRs = useMemo(() => (
     user?.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos'

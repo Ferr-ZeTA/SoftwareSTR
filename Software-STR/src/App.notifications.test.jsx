@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { render, screen, cleanup, act, within } from '@testing-library/react'
+import { render, screen, cleanup, act, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 function makeSTR(overrides = {}) {
@@ -52,6 +52,11 @@ vi.mock('./services/notificationSound', () => ({
 
 const { default: App } = await import('./App.jsx')
 
+async function openRequestsView() {
+  fireEvent.click(screen.getByRole('link', { name: /Solicitudes STR/ }))
+  await screen.findByText(/Mostrando/)
+}
+
 describe('envío a aprobación', () => {
   beforeEach(() => {
     localStorage.setItem('strflow-user', JSON.stringify({
@@ -67,7 +72,7 @@ describe('envío a aprobación', () => {
   it('muestra la pantalla de éxito al enviar el correo', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Aprobación/ }))
     await user.type(screen.getByLabelText(/Información adicional/), 'Urge para el lunes')
@@ -87,7 +92,7 @@ describe('envío a aprobación', () => {
 
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Aprobación/ }))
     await user.click(screen.getByRole('button', { name: /Enviar a gerente/ }))
@@ -121,7 +126,7 @@ describe('notificación de aprobación', () => {
     getSTRs.mockImplementation(async () => [makeSTR()])
 
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     // La primera relectura solo toma la foto del estado actual: no debe avisar
     // de lo que ya estaba decidido al abrir la app.
@@ -147,7 +152,7 @@ describe('notificación de aprobación', () => {
     getSTRs.mockImplementation(async () => [makeSTR()])
 
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
     await act(async () => { await vi.advanceTimersByTimeAsync(6100) })
 
     getSTRs.mockImplementation(async () => [makeSTR({ estado: 'No Aprobada' })])
@@ -173,7 +178,7 @@ describe('historial de notificaciones', () => {
   it('arranca vacío y lo dice', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByLabelText('Notificaciones'))
 
@@ -185,7 +190,7 @@ describe('historial de notificaciones', () => {
   it('guarda lo enviado y lo marca como leído al abrir el panel', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Aprobación/ }))
     await user.click(screen.getByRole('button', { name: /Enviar a gerente/ }))
@@ -208,7 +213,7 @@ describe('historial de notificaciones', () => {
   it('se cierra con Escape y se puede limpiar', async () => {
     const user = userEvent.setup()
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Aprobación/ }))
     await user.click(screen.getByRole('button', { name: /Enviar a gerente/ }))
@@ -244,7 +249,7 @@ describe('aviso prioritario a pantalla completa', () => {
   async function provocarDecision(estado) {
     getSTRs.mockImplementation(async () => [makeSTR()])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
     await act(async () => { await vi.advanceTimersByTimeAsync(6100) })
 
     getSTRs.mockImplementation(async () => [makeSTR({ estado })])
@@ -299,7 +304,7 @@ describe('botón de aprobación según el estado', () => {
   it('lo oculta cuando ya está aprobada', async () => {
     getSTRs.mockImplementation(async () => [makeSTR({ estado: 'Aprobada' })])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     expect(within(fila()).queryByRole('button', { name: /Aprobación/ })).toBeNull()
     // Ver detalles sigue disponible.
@@ -309,13 +314,13 @@ describe('botón de aprobación según el estado', () => {
   it('lo mantiene en pendientes y en no aprobadas', async () => {
     getSTRs.mockImplementation(async () => [makeSTR({ estado: 'Pendiente' })])
     const { unmount } = render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
     expect(within(fila()).getByRole('button', { name: /Aprobación/ })).toBeTruthy()
     unmount()
 
     getSTRs.mockImplementation(async () => [makeSTR({ estado: 'No Aprobada' })])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
     expect(within(fila()).getByRole('button', { name: /Aprobación/ })).toBeTruthy()
   })
 })
@@ -342,7 +347,7 @@ describe('detalle de la decisión', () => {
   it('no ofrece ver decisión en las pendientes', async () => {
     getSTRs.mockImplementation(async () => [makeSTR()])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     expect(screen.queryByRole('button', { name: /Ver decisión/ })).toBeNull()
   })
@@ -351,7 +356,7 @@ describe('detalle de la decisión', () => {
     const user = userEvent.setup()
     getSTRs.mockImplementation(async () => [makeSTR(decidida)])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Ver decisión/ }))
 
@@ -366,7 +371,7 @@ describe('detalle de la decisión', () => {
     const user = userEvent.setup()
     getSTRs.mockImplementation(async () => [makeSTR({ ...decidida, motivo: '' })])
     render(<App />)
-    await screen.findByText(/Mostrando/)
+    await openRequestsView()
 
     await user.click(screen.getByRole('button', { name: /Ver decisión/ }))
     expect(screen.getByText('No se escribió un motivo para esta decisión.')).toBeTruthy()
