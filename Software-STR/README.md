@@ -234,10 +234,13 @@ artículo/modelo— por país y número de documento. El identificador resultant
 líneas y la cantidad total.
 
 Se interpretan fechas de API en formato día/mes/año con hora opcional y se
-filtran con `SYNC_MIN_DATE`. Las respuestas de API fallidas quedan en el
-resumen de errores de sincronización. Una respuesta `404` con cuerpo vacío se
-trata como país sin datos; no se usa para inferir que los registros anteriores
-deben borrarse.
+filtran con `SYNC_MIN_DATE`. El listado del dashboard aplica también esa fecha
+mínima, incluso si quedaron registros anteriores en MongoDB; esos datos
+históricos se conservan en la base, pero no aparecen ni se cuentan como
+solicitudes vigentes. Las respuestas de API fallidas quedan en el resumen de
+errores de sincronización. Una respuesta `404` con cuerpo vacío se trata como
+país sin datos; no se usa para inferir que los registros anteriores deben
+borrarse.
 
 ### Cómo se conserva el estado local
 

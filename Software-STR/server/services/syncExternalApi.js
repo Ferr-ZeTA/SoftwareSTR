@@ -5,7 +5,7 @@ const API_BASE = process.env.EXTERNAL_API_URL
 const COUNTRIES = ['GT', 'SV']
 // Solo se persisten traslados con fecha >= SYNC_MIN_DATE. La API devuelve
 // historico desde 2023 y no nos interesa.
-const MIN_DATE = new Date(process.env.SYNC_MIN_DATE || '2026-10-01T00:00:00Z')
+export const MIN_DATE = new Date(process.env.SYNC_MIN_DATE || '2026-10-01T00:00:00Z')
 
 // La API devuelve "30/06/2023 12:00:00 a.m." (dd/mm/yyyy + hora en español).
 export function parseApiDate(value) {

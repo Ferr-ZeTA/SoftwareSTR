@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken'
 
 process.env.SAP_APPROVAL_ENABLED = 'false'
 process.env.JWT_SECRET = 'test-secret-for-approval-routes'
+process.env.SYNC_MIN_DATE = '2026-10-01T00:00:00Z'
 
 const [{ createApp }, { Request }, { issueApprovalToken }] = await Promise.all([
   import('../app.js'),
@@ -42,6 +43,7 @@ async function createPendingRequest() {
     externalId: 'GT-approval-test',
     documento: 'approval-test',
     country: 'GT',
+    fecha: new Date('2026-10-15T12:00:00Z'),
     clienteNombre: 'Cliente de prueba',
   })
   return issueApprovalToken(request.externalId, 'gerente@example.com')
@@ -58,6 +60,24 @@ function managerHeaders() {
 }
 
 describe('aprobacion por correo y dashboard', () => {
+  it('solo lista solicitudes desde SYNC_MIN_DATE aunque queden datos antiguos en MongoDB', async () => {
+    await createPendingRequest()
+    await Request.create({
+      externalId: 'GT-old-test',
+      documento: 'old-test',
+      country: 'GT',
+      fecha: new Date('2026-09-30T12:00:00Z'),
+      clienteNombre: 'Registro fuera de rango',
+    })
+
+    const response = await fetch(`${base}/api/requests`, { headers: managerHeaders() })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.total).toBe(1)
+    expect(payload.data.map((item) => item.externalId)).toEqual(['GT-approval-test'])
+  })
+
   it('muestra solo la justificacion como campo editable', async () => {
     const issued = await createPendingRequest()
     const response = await fetch(

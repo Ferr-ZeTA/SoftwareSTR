@@ -1605,6 +1605,8 @@ input, textarea, select { transition: border-color .2s var(--ease), box-shadow .
   color: var(--ink); font: inherit; font-weight: 400;
 }
 .approval-note textarea:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+.approval-note textarea[aria-invalid="true"] { border-color: var(--red); }
+.approval-note-error { color: var(--red); font-size: 12px; font-weight: 500; }
 .approval-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin-top: 18px; }
 .approval-card-actions .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .deferred-invoice-card > p { color: var(--muted); font-size: 13px; }

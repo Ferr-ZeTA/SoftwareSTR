@@ -178,6 +178,29 @@ describe('paginación de la tabla', () => {
     expect(await screen.findByText(/No tienes aprobaciones pendientes/)).toBeTruthy()
   })
 
+  it('explica el motivo requerido al rechazar y permite enviar el rechazo con justificacion', async () => {
+    const user = userEvent.setup()
+    STRS[0].aprobacionEnviada = true
+    render(<App />)
+
+    await screen.findByRole('heading', { name: /Solicitudes de aprobación/ })
+    const reject = screen.getByRole('button', { name: /Rechazar/ })
+    expect(reject.disabled).toBe(false)
+    await user.click(reject)
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Escribe una justificación para poder rechazar esta solicitud.',
+    )
+    expect(decideApproval).not.toHaveBeenCalled()
+
+    await user.type(screen.getByLabelText('Justificación para GT-1001'), 'Falta confirmar existencias.')
+    await user.click(reject)
+    expect(decideApproval).toHaveBeenCalledWith(
+      'GT-1001',
+      'No Aprobada',
+      'Falta confirmar existencias.',
+    )
+  })
+
   it('muestra en Ver facturas las solicitudes pospuestas de ambos países', async () => {
     const user = userEvent.setup()
     STRS[0].aprobacionEnviada = true

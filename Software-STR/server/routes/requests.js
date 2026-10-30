@@ -9,7 +9,7 @@ import {
 import {
   sendApprovalEmail, getBrevoConfigError, escapeHtml,
 } from '../services/mailer.js'
-import { syncExternalApi } from '../services/syncExternalApi.js'
+import { MIN_DATE, syncExternalApi } from '../services/syncExternalApi.js'
 import { authorizeInSap } from '../services/sapApproval.js'
 
 export const requestsRouter = Router()
@@ -256,15 +256,18 @@ requestsRouter.get('/', async (request, response) => {
   const page = Math.max(1, Number(request.query.page) || 1)
   const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 50))
 
-  const filter = { deletedLocally: false }
+  const filter = {
+    deletedLocally: false,
+    fecha: { $gte: new Date(MIN_DATE) },
+  }
   if (status) filter.localStatus = String(status)
   if (tipo) filter.tipoSolicitud = String(tipo)
   if (country) filter.country = String(country)
-  if (from || to) {
-    filter.fecha = {}
-    if (from) filter.fecha.$gte = new Date(String(from))
-    if (to) filter.fecha.$lte = new Date(String(to))
+  if (from) {
+    const requestedFrom = new Date(String(from))
+    filter.fecha.$gte = requestedFrom > MIN_DATE ? requestedFrom : new Date(MIN_DATE)
   }
+  if (to) filter.fecha.$lte = new Date(String(to))
   if (search) {
     const term = new RegExp(String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
     filter.$or = [

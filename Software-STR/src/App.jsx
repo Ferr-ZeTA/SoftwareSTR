@@ -476,6 +476,16 @@ function ApprovalDetailsModal({ str, onClose }) {
 
 function ApprovalInboxCard({ str, busy, onView, onDefer, onDecide }) {
   const [note, setNote] = useState('')
+  const [noteError, setNoteError] = useState('')
+
+  function rejectRequest() {
+    if (!note.trim()) {
+      setNoteError('Escribe una justificación para poder rechazar esta solicitud.')
+      return
+    }
+    setNoteError('')
+    onDecide(str, 'No Aprobada', note)
+  }
 
   return (
     <article className="approval-card">
@@ -517,12 +527,18 @@ function ApprovalInboxCard({ str, busy, onView, onDefer, onDecide }) {
         Justificación <span>(obligatoria para rechazar)</span>
         <textarea
           value={note}
-          onChange={(event) => setNote(event.target.value)}
+          onChange={(event) => {
+            setNote(event.target.value)
+            if (event.target.value.trim()) setNoteError('')
+          }}
           aria-label={`Justificación para ${str.id}`}
+          aria-invalid={Boolean(noteError)}
+          aria-describedby={noteError ? `approval-note-error-${str.id}` : undefined}
           rows="2"
           disabled={busy}
           placeholder="Agrega un comentario para el historial de esta decisión..."
         />
+        {noteError && <span id={`approval-note-error-${str.id}`} className="approval-note-error" role="alert">{noteError}</span>}
       </label>
       <footer className="approval-card-actions">
         <button type="button" className="button button-secondary" onClick={() => onView(str)} disabled={busy}>
@@ -531,7 +547,7 @@ function ApprovalInboxCard({ str, busy, onView, onDefer, onDecide }) {
         <button type="button" className="button button-secondary" onClick={() => onDefer(str)} disabled={busy}>
           <Icon name="clock" size={15} /> Ver más tarde
         </button>
-        <button type="button" className="button button-danger" onClick={() => onDecide(str, 'No Aprobada', note)} disabled={busy || !note.trim()}>
+        <button type="button" className="button button-danger" onClick={rejectRequest} disabled={busy}>
           <Icon name="x" size={15} /> Rechazar
         </button>
         <button type="button" className="button button-primary" onClick={() => onDecide(str, 'Aprobada', note)} disabled={busy}>
