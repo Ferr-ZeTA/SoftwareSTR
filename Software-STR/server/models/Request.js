@@ -72,6 +72,8 @@ const localFields = {
   approvalDecidedBy: { type: String, default: null },
   approvalDecidedVia: { type: String, enum: ['correo', 'dashboard', 'sistema', null], default: null },
   approvalSentTo: { type: String, default: null },
+  approvalDeferredAt: { type: Date, default: null },
+  approvalDeferredBy: { type: String, default: null },
   approvalHistory: { type: [decisionSchema], default: [] },
   // La API dejo de devolver este traslado. No se borra (perderiamos la
   // decision local), se marca para que la divergencia sea visible.
@@ -118,6 +120,8 @@ export const LOCAL_DEFAULTS = {
   approvalDecidedBy: null,
   approvalDecidedVia: null,
   approvalSentTo: null,
+  approvalDeferredAt: null,
+  approvalDeferredBy: null,
   approvalHistory: [],
   sapPushStatus: SAP_PUSH_STATUS.NO_APLICA,
   sapPushAt: null,

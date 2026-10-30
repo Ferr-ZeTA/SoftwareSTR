@@ -10,6 +10,19 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
 
+export async function invalidateApprovalToken(externalId, token) {
+  return Request.findOneAndUpdate({
+    externalId,
+    approvalTokenHash: hashToken(token),
+    approvalTokenUsedAt: null,
+  }, {
+    $set: {
+      approvalTokenUsedAt: new Date(),
+      approvalSentTo: null,
+    },
+  })
+}
+
 // Genera un token de un solo uso. Devuelve el token plano (solo para el correo);
 // en la DB queda únicamente el hash, así que el ID nunca viaja en la URL.
 export async function issueApprovalToken(externalId, sentTo = null) {
@@ -62,6 +75,7 @@ export async function consumeApprovalToken(token, status, sap = {}) {
     approvalTokenUsedAt: null,
     approvalTokenExpiresAt: { $gt: now },
     deletedLocally: false,
+    localStatus: LOCAL_STATUS.PENDIENTE,
   }).select('localStatus approvalSentTo').lean()
 
   // El filtro vuelve a exigir approvalTokenUsedAt: null, asi que si dos
@@ -72,6 +86,7 @@ export async function consumeApprovalToken(token, status, sap = {}) {
       approvalTokenUsedAt: null,
       approvalTokenExpiresAt: { $gt: now },
       deletedLocally: false,
+      localStatus: LOCAL_STATUS.PENDIENTE,
     },
     {
       $set: {
@@ -108,9 +123,10 @@ export async function consumeApprovalToken(token, status, sap = {}) {
 
   // Distingue "ya usado / expirado" de "token desconocido" sin revelar el ID.
   const existing = await Request.findOne({ approvalTokenHash: hashToken(token) })
-    .select('approvalTokenUsedAt approvalTokenExpiresAt')
+    .select('approvalTokenUsedAt approvalTokenExpiresAt localStatus')
     .lean()
   if (!existing) return { ok: false, reason: 'unknown' }
   if (existing.approvalTokenUsedAt) return { ok: false, reason: 'used' }
+  if (existing.localStatus !== LOCAL_STATUS.PENDIENTE) return { ok: false, reason: 'decided' }
   return { ok: false, reason: 'expired' }
 }

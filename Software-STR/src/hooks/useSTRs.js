@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  getSTRs, sendApprovalEmail, updateLocalStatus, syncNow, getToken,
+  getSTRs, sendApprovalEmail, decideApproval, deferApproval, restoreApproval, syncNow, getToken,
 } from '../services/strService'
 
 // Cada cuanto se relee en silencio para detectar lo que se aprobo por correo.
@@ -85,8 +85,16 @@ export function useSTRs(onSessionExpired, onStatusChange) {
   }, [])
 
   // Persiste el estado en la DB y refleja la respuesta del servidor.
-  const updateStatus = useCallback(async (id, estado) => {
-    const updated = await updateLocalStatus(id, estado)
+  const updateStatus = useCallback(async (id, estado, note) => {
+    const updated = await decideApproval(id, estado, note)
+    statusesRef.current.set(id, updated.estado)
+    setSTRs((current) => current.map((str) => (str.id === id ? updated : str)))
+    return updated
+  }, [])
+
+  const updateDeferred = useCallback(async (id, action) => {
+    const update = action === 'defer' ? deferApproval : restoreApproval
+    const updated = await update(id)
     setSTRs((current) => current.map((str) => (str.id === id ? updated : str)))
     return updated
   }, [])
@@ -102,5 +110,5 @@ export function useSTRs(onSessionExpired, onStatusChange) {
     return summary
   }, [loadSTRs])
 
-  return { strs, isLoading, error, updateStatus, requestApproval, sync, reload: loadSTRs }
+  return { strs, isLoading, error, updateStatus, updateDeferred, requestApproval, sync, reload: loadSTRs }
 }

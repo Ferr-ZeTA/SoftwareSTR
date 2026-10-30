@@ -474,6 +474,97 @@ function ApprovalDetailsModal({ str, onClose }) {
   )
 }
 
+function ApprovalInboxCard({ str, busy, onView, onDefer, onDecide }) {
+  const [note, setNote] = useState('')
+
+  return (
+    <article className="approval-card">
+      <header className="approval-card-header">
+        <div>
+          <span className="eyebrow">SOLICITUD DE APROBACIÓN</span>
+          <h2>{str.id} · {str.cliente}</h2>
+        </div>
+        <StatusBadge status={str.estado} />
+      </header>
+      <div className="approval-card-facts">
+        <div><span>Documento</span><strong>{str.documento}</strong></div>
+        <div><span>País</span><strong>{str.pais === 'GT' ? 'Guatemala' : 'El Salvador'}</strong></div>
+        <div><span>Fecha</span><strong>{str.fecha}</strong></div>
+        <div><span>Ruta</span><strong>{str.bodegaOrigen} → {str.bodegaDestino}</strong></div>
+        <div><span>Tipo de solicitud</span><strong>{str.tipoSolicitud || 'Sin especificar'}</strong></div>
+        <div><span>Total</span><strong>{str.totalCantidad} unidades · {str.totalLineas} línea(s)</strong></div>
+      </div>
+      <div className="approval-card-items">
+        <strong>Detalle de artículos</strong>
+        <div className="table-wrap">
+          <table className="items-table">
+            <thead><tr><th>Modelo</th><th>Descripción</th><th>Cantidad</th></tr></thead>
+            <tbody>
+              {str.items.length
+                ? str.items.map((item, index) => (
+                  <tr key={`${item.modelo}-${index}`}>
+                    <td>{item.modelo || '—'}</td>
+                    <td>{item.descripcion || '—'}</td>
+                    <td>{item.cantidad}</td>
+                  </tr>
+                ))
+                : <tr><td colSpan="3">No hay artículos registrados.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <label className="approval-note">
+        Justificación <span>(obligatoria para rechazar)</span>
+        <textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          aria-label={`Justificación para ${str.id}`}
+          rows="2"
+          disabled={busy}
+          placeholder="Agrega un comentario para el historial de esta decisión..."
+        />
+      </label>
+      <footer className="approval-card-actions">
+        <button type="button" className="button button-secondary" onClick={() => onView(str)} disabled={busy}>
+          <Icon name="eye" size={15} /> Ver factura
+        </button>
+        <button type="button" className="button button-secondary" onClick={() => onDefer(str)} disabled={busy}>
+          <Icon name="clock" size={15} /> Ver más tarde
+        </button>
+        <button type="button" className="button button-danger" onClick={() => onDecide(str, 'No Aprobada', note)} disabled={busy || !note.trim()}>
+          <Icon name="x" size={15} /> Rechazar
+        </button>
+        <button type="button" className="button button-primary" onClick={() => onDecide(str, 'Aprobada', note)} disabled={busy}>
+          <Icon name="check" size={15} /> Aprobar
+        </button>
+      </footer>
+    </article>
+  )
+}
+
+function DeferredInvoiceCard({ str, busy, onView, onRestore }) {
+  return (
+    <article className="approval-card deferred-invoice-card">
+      <div className="approval-card-header">
+        <div>
+          <span className="eyebrow">POSPUESTA PARA REVISIÓN</span>
+          <h2>{str.id} · {str.cliente}</h2>
+        </div>
+        <StatusBadge status={str.estado} />
+      </div>
+      <p>{str.pais === 'GT' ? 'Guatemala' : 'El Salvador'} · {str.ruta} · {str.totalLineas} línea(s) · {str.totalCantidad} unidades</p>
+      <div className="approval-card-actions">
+        <button type="button" className="button button-secondary" onClick={() => onView(str)} disabled={busy}>
+          <Icon name="eye" size={15} /> Ver factura
+        </button>
+        <button type="button" className="button button-primary" onClick={() => onRestore(str)} disabled={busy}>
+          <Icon name="arrow" size={15} /> Regresar a aprobaciones
+        </button>
+      </div>
+    </article>
+  )
+}
+
 // Lo que respondio SAP, en palabras.
 const SAP_LABEL = {
   ok: 'Registrado en SAP',
@@ -691,11 +782,15 @@ function App() {
     })
   }, [notify])
 
-  const { strs, isLoading, error, requestApproval, reload, sync } = useSTRs(handleSessionExpired, handleStatusChange)
+  const {
+    strs, isLoading, error, updateStatus, updateDeferred, requestApproval, reload, sync,
+  } = useSTRs(handleSessionExpired, handleStatusChange)
   const [selectedSTR, setSelectedSTR] = useState(null)
   const [detailSTR, setDetailSTR] = useState(null)
   const [approvalSTR, setApprovalSTR] = useState(null)
   const [showUsers, setShowUsers] = useState(false)
+  const [activeView, setActiveView] = useState('requests')
+  const [processingApprovalId, setProcessingApprovalId] = useState('')
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('strflow-sidebar') === 'collapsed' } catch { return false }
   })
@@ -728,6 +823,15 @@ function App() {
   }
 
   const visibleSTRs = user?.role === 'GERENTE_GENERAL' ? strs : strs.filter((str) => str.pais === user?.country)
+  const approvalRequests = visibleSTRs.filter((str) => (
+    str.aprobacionEnviada && str.estado === 'Pendiente' && !str.aprobacionPospuestaEn
+  ))
+  const deferredInvoices = visibleSTRs.filter((str) => (
+    str.aprobacionEnviada
+    && str.estado === 'Pendiente'
+    && str.aprobacionPospuestaEn
+    && str.aprobacionPospuestaPor === user?.email
+  ))
   const countryScopedSTRs = useMemo(() => (
     user?.role === 'GERENTE_GENERAL' && countryFilter !== 'Todos'
       ? visibleSTRs.filter((str) => str.pais === countryFilter)
@@ -820,6 +924,39 @@ function App() {
     }
   }
 
+  async function decideApproval(str, status, note) {
+    setProcessingApprovalId(str.id)
+    try {
+      await updateStatus(str.id, status, note)
+      notify({
+        variant: 'success',
+        title: status === 'Aprobada' ? 'Solicitud aprobada' : 'Solicitud rechazada',
+        message: `${str.id} · ${str.cliente}`,
+      })
+    } catch (caught) {
+      notify({ variant: 'error', title: 'No se pudo guardar la decisión', message: caught.message })
+    } finally {
+      setProcessingApprovalId('')
+    }
+  }
+
+  async function changeDeferred(str, action) {
+    setProcessingApprovalId(str.id)
+    try {
+      await updateDeferred(str.id, action)
+      notify({
+        variant: 'success',
+        message: action === 'defer'
+          ? `${str.id} se guardó en Ver facturas.`
+          : `${str.id} regresó a las aprobaciones pendientes.`,
+      })
+    } catch (caught) {
+      notify({ variant: 'error', title: 'No se pudo actualizar la solicitud', message: caught.message })
+    } finally {
+      setProcessingApprovalId('')
+    }
+  }
+
   const [isSyncing, setIsSyncing] = useState(false)
 
   // El gerente general dispara una consulta real a la API externa; los
@@ -853,7 +990,13 @@ function App() {
         <div className="brand"><div className="brand-mark">S</div><div><strong>STR<span>flow</span></strong><small>OPERACIONES</small></div></div>
         <nav className="side-nav" aria-label="Navegación principal">
           <span className="nav-label">GESTIÓN</span>
-          <a className="nav-item active" href="#dashboard" data-label="Solicitudes STR"><span className="nav-icon"><Icon name="file" size={17} /></span><span className="nav-text">Solicitudes STR</span> <b>{counts.pending}</b></a>
+          <a className={`nav-item${activeView === 'requests' ? ' active' : ''}`} href="#dashboard" data-label="Solicitudes STR" onClick={(event) => { event.preventDefault(); setActiveView('requests') }}><span className="nav-icon"><Icon name="file" size={17} /></span><span className="nav-text">Solicitudes STR</span> <b>{counts.pending}</b></a>
+          {user.role === 'GERENTE_GENERAL' && (
+            <>
+              <a className={`nav-item${activeView === 'approvals' ? ' active' : ''}`} href="#aprobaciones" data-label="Aprobaciones" onClick={(event) => { event.preventDefault(); setActiveView('approvals') }}><span className="nav-icon"><Icon name="check" size={17} /></span><span className="nav-text">Aprobaciones</span><b>{approvalRequests.length}</b></a>
+              <a className={`nav-item${activeView === 'invoices' ? ' active' : ''}`} href="#facturas" data-label="Ver facturas" onClick={(event) => { event.preventDefault(); setActiveView('invoices') }}><span className="nav-icon"><Icon name="file" size={17} /></span><span className="nav-text">Ver facturas</span><b>{deferredInvoices.length}</b></a>
+            </>
+          )}
           <span className="nav-label nav-label-spaced">SISTEMA</span>
           {user.role === 'GERENTE_GENERAL' && <a className={`nav-item${showUsers ? ' active' : ''}`} href="#usuarios" data-label="Usuarios" onClick={(event) => { event.preventDefault(); setShowUsers(true) }}><span className="nav-icon"><Icon name="users" size={17} /></span><span className="nav-text">Usuarios</span></a>}
         </nav>
@@ -886,6 +1029,8 @@ function App() {
             </div>
           </div></header>
         <div className="content">
+          {activeView === 'requests' ? (
+            <>
           <div className="page-heading"><div><span className="eyebrow">CENTRO DE CONTROL</span><h1>Solicitudes STR</h1><p>Gestiona y da seguimiento a las solicitudes de tus clientes.</p></div><button className="button button-primary" onClick={refreshSTRs} disabled={isLoading || isSyncing}><Icon name="refresh" size={16} /> {isSyncing ? 'Consultando la API...' : isLoading ? 'Cargando...' : 'Actualizar'}</button></div>
           <section className="stats-grid" aria-label="Resumen de solicitudes">
             <div className="stat-card"><div className="stat-top"><span>Total de solicitudes</span><div className="stat-icon blue"><Icon name="file" size={18} /></div></div><strong>{counts.total}</strong><small><span className="neutral-dot" /> Todas las solicitudes</small></div>
@@ -1001,6 +1146,63 @@ function App() {
               </div>
             </div>
           </section>
+            </>
+          ) : activeView === 'approvals' ? (
+            <>
+              <div className="page-heading">
+                <div><span className="eyebrow">BANDEJA DEL GERENTE GENERAL</span><h1>Solicitudes de aprobación</h1><p>Te han enviado estas solicitudes para revisar su detalle y decidir.</p></div>
+                <button className="button button-secondary" onClick={reload} disabled={isLoading}><Icon name="refresh" size={16} /> Actualizar</button>
+              </div>
+              {error && <p className="approval-page-error" role="alert">{error}</p>}
+              {approvalRequests.length ? (
+                <div className="approval-queue">
+                  {approvalRequests.map((str) => (
+                    <ApprovalInboxCard
+                      key={str.id}
+                      str={str}
+                      busy={processingApprovalId === str.id}
+                      onView={setDetailSTR}
+                      onDefer={(item) => changeDeferred(item, 'defer')}
+                      onDecide={decideApproval}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <section className="approval-empty">
+                  <span className="stat-icon green"><Icon name="check" size={20} /></span>
+                  <h2>No tienes aprobaciones pendientes</h2>
+                  <p>Cuando te envíen una solicitud de aprobación, aparecerá aquí.</p>
+                </section>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="page-heading">
+                <div><span className="eyebrow">PENDIENTES PARA DESPUÉS</span><h1>Ver facturas</h1><p>Solicitudes que marcaste para revisar más tarde.</p></div>
+                <button className="button button-secondary" onClick={reload} disabled={isLoading}><Icon name="refresh" size={16} /> Actualizar</button>
+              </div>
+              {error && <p className="approval-page-error" role="alert">{error}</p>}
+              {deferredInvoices.length ? (
+                <div className="approval-queue">
+                  {deferredInvoices.map((str) => (
+                    <DeferredInvoiceCard
+                      key={str.id}
+                      str={str}
+                      busy={processingApprovalId === str.id}
+                      onView={setDetailSTR}
+                      onRestore={(item) => changeDeferred(item, 'restore')}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <section className="approval-empty">
+                  <span className="stat-icon blue"><Icon name="file" size={20} /></span>
+                  <h2>No tienes facturas pospuestas</h2>
+                  <p>Usa “Ver más tarde” en una aprobación para guardarla aquí.</p>
+                </section>
+              )}
+            </>
+          )}
         </div>
       </main>
       {selectedSTR && <ApprovalModal str={selectedSTR} error={sendError} onClose={() => setSelectedSTR(null)} onSend={sendEmail} />}

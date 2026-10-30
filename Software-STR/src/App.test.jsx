@@ -33,6 +33,21 @@ vi.mock('./services/strService', () => ({
   login: vi.fn(),
   getSTRs: vi.fn(async () => STRS),
   sendApprovalEmail: vi.fn(),
+  decideApproval: vi.fn(async (id, estado, motivo) => ({
+    ...STRS.find((str) => str.id === id),
+    estado,
+    motivo,
+  })),
+  deferApproval: vi.fn(async (id) => ({
+    ...STRS.find((str) => str.id === id),
+    aprobacionPospuestaEn: new Date().toISOString(),
+    aprobacionPospuestaPor: 'general@red.com',
+  })),
+  restoreApproval: vi.fn(async (id) => ({
+    ...STRS.find((str) => str.id === id),
+    aprobacionPospuestaEn: null,
+    aprobacionPospuestaPor: null,
+  })),
   updateLocalStatus: vi.fn(),
   syncNow: vi.fn(),
   getUsers: vi.fn(async () => [{
@@ -49,7 +64,7 @@ vi.mock('./services/strService', () => ({
 }))
 
 const { default: App } = await import('./App.jsx')
-const { deleteUser, sendApprovalEmail } = await import('./services/strService')
+const { decideApproval, deleteUser, deferApproval, sendApprovalEmail, restoreApproval } = await import('./services/strService')
 
 function rowIds() {
   const rows = screen.getAllByRole('row').slice(1) // sin la cabecera
@@ -58,6 +73,14 @@ function rowIds() {
 
 describe('paginación de la tabla', () => {
   beforeEach(() => {
+    STRS.forEach((str) => {
+      delete str.aprobacionEnviada
+      delete str.aprobacionPospuestaEn
+      delete str.aprobacionPospuestaPor
+    })
+    decideApproval.mockClear()
+    deferApproval.mockClear()
+    restoreApproval.mockClear()
     localStorage.setItem('strflow-user', JSON.stringify({
       email: 'general@red.com', name: 'General', role: 'GERENTE_GENERAL', country: null,
     }))
@@ -133,6 +156,41 @@ describe('paginación de la tabla', () => {
     expect(screen.getByText('12 resultados')).toBeTruthy()
     const statusFilters = screen.getByRole('group', { name: 'Filtrar por estado' })
     expect(within(statusFilters).getByRole('button', { name: /Pendiente/ }).textContent).toContain('12')
+  })
+
+  it('muestra la bandeja de aprobaciones con el detalle y permite decidir desde el dashboard', async () => {
+    const user = userEvent.setup()
+    STRS[0].aprobacionEnviada = true
+    STRS[0].items = [{ modelo: 'M-1', descripcion: 'Producto de prueba', cantidad: 5 }]
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
+
+    expect(await screen.findByRole('heading', { name: /Solicitudes de aprobación/ })).toBeTruthy()
+    expect(screen.getByText('Producto de prueba')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: /Aprobar/ }))
+
+    expect(decideApproval).toHaveBeenCalledWith('GT-1001', 'Aprobada', '')
+    expect(await screen.findByText(/No tienes aprobaciones pendientes/)).toBeTruthy()
+  })
+
+  it('guarda las solicitudes pospuestas en Ver facturas y permite devolverlas a la bandeja', async () => {
+    const user = userEvent.setup()
+    STRS[0].aprobacionEnviada = true
+    render(<App />)
+
+    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
+    await screen.findByRole('heading', { name: /Solicitudes de aprobación/ })
+    await user.click(screen.getByRole('button', { name: /Ver más tarde/ }))
+    expect(deferApproval).toHaveBeenCalledWith('GT-1001')
+
+    await user.click(screen.getByRole('link', { name: /Ver facturas/ }))
+    expect(await screen.findByRole('heading', { name: 'Ver facturas' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /GT-1001/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: /Regresar a aprobaciones/ }))
+    expect(restoreApproval).toHaveBeenCalledWith('GT-1001')
+    await user.click(screen.getByRole('link', { name: /Aprobaciones/ }))
+    expect(await screen.findByRole('button', { name: /Ver más tarde/ })).toBeTruthy()
   })
 
   it('muestra errores al enviar el correo sin desmontar la aplicación', async () => {

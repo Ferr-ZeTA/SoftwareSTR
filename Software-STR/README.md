@@ -304,6 +304,14 @@ enviar otro país.
 6. El frontend consulta periódicamente las solicitudes para detectar cambios
    hechos por correo y mostrar una notificación.
 
+El gerente general también puede revisar las solicitudes enviadas desde la
+opción **Aprobaciones** del dashboard. Allí ve los datos del traslado y sus
+artículos, puede aprobar o rechazar (con justificación obligatoria al
+rechazar), o guardarlo para después. Las solicitudes pospuestas aparecen en
+**Ver facturas** y pueden regresar a la bandeja. La decisión tomada desde el
+correo o el dashboard se guarda en el mismo registro; al decidir en el panel,
+el enlace pendiente del correo queda invalidado.
+
 Los enlaces caducan según `APPROVAL_TOKEN_TTL_HOURS` y solo pueden usarse una
 vez. `APPROVAL_PUBLIC_URL` debe omitirse en Render para que se use
 `RENDER_EXTERNAL_URL`; no configures una URL `localhost` en producción.
@@ -338,6 +346,9 @@ Las rutas de solicitudes también aplican el alcance por país.
 | `PATCH /api/requests/:externalId` | JWT | Cambia estado local y/o notas internas. |
 | `POST /api/requests/sync` | JWT + gerente general | Sincroniza países (opcionalmente `{"countries":["GT"]}`). |
 | `POST /api/requests/:externalId/send-approval` | JWT | Envía el correo de aprobación. |
+| `POST /api/requests/:externalId/decide-approval` | JWT + gerente general | Aprueba o rechaza una solicitud enviada; invalida el enlace del correo. |
+| `POST /api/requests/:externalId/defer-approval` | JWT + gerente general | Guarda la solicitud para revisarla después. |
+| `POST /api/requests/:externalId/restore-approval` | JWT + gerente general | Devuelve la solicitud pospuesta a la bandeja. |
 | `DELETE /api/requests/:externalId` | JWT | Oculta localmente; no elimina de la API externa. |
 | `POST /api/requests/:externalId/restore` | JWT | Restaura una solicitud ocultada. |
 

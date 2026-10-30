@@ -3,7 +3,8 @@ import { Request, LOCAL_STATUS, SAP_PUSH_STATUS } from '../models/Request.js'
 import { ROLES } from '../models/User.js'
 import { authenticate, enforceScope, requireRole } from '../middleware/auth.js'
 import {
-  issueApprovalToken, consumeApprovalToken, peekApprovalToken, REVERT_WINDOW_SECONDS,
+  issueApprovalToken, invalidateApprovalToken, consumeApprovalToken, peekApprovalToken,
+  REVERT_WINDOW_SECONDS,
 } from '../services/approvalService.js'
 import {
   sendApprovalEmail, getBrevoConfigError, escapeHtml,
@@ -19,6 +20,7 @@ const LIST_PROJECTION = '-raw -approvalTokenHash'
 const LINK_ERRORS = {
   used: 'Este enlace ya fue utilizado. Cada enlace sirve una sola vez.',
   expired: 'Este enlace expiro. Solicita que se reenvie la aprobacion.',
+  decided: 'Esta solicitud ya fue decidida desde el panel.',
   unknown: 'El enlace de aprobacion no es valido.',
   invalid: 'El enlace de aprobacion esta incompleto o la respuesta no es valida.',
 }
@@ -294,10 +296,57 @@ requestsRouter.get('/:externalId', async (request, response) => {
   response.json(found)
 })
 
+requestsRouter.post('/:externalId/decide-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
+  const { status, note = '' } = request.body ?? {}
+  if (![LOCAL_STATUS.APROBADA, LOCAL_STATUS.NO_APROBADA].includes(status)) {
+    return response.status(400).json({ error: 'La decisión debe ser Aprobada o No Aprobada.' })
+  }
+  if (status === LOCAL_STATUS.NO_APROBADA && !String(note).trim()) {
+    return response.status(400).json({ error: 'Escribe una justificación para rechazar la solicitud.' })
+  }
+
+  const now = new Date()
+  const updated = await Request.findOneAndUpdate({
+    externalId: request.params.externalId,
+    deletedLocally: false,
+    localStatus: LOCAL_STATUS.PENDIENTE,
+    approvalSentTo: { $ne: null },
+    approvalDeferredBy: null,
+    ...request.scope,
+  }, {
+    $set: {
+      localStatus: status,
+      approvalDecidedAt: now,
+      approvalDecidedBy: request.user.email,
+      approvalDecidedVia: 'dashboard',
+      approvalTokenUsedAt: now,
+      approvalDeferredAt: null,
+      approvalDeferredBy: null,
+    },
+    $push: {
+      approvalHistory: {
+        status,
+        previousStatus: LOCAL_STATUS.PENDIENTE,
+        by: request.user.email,
+        via: 'dashboard',
+        at: now,
+        note: String(note).trim().slice(0, 5000),
+      },
+    },
+  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+
+  if (!updated) {
+    return response.status(409).json({ error: 'La solicitud ya fue decidida o no está pendiente de aprobación.' })
+  }
+  response.json(updated)
+})
+
 // Solo campos locales: la API externa sigue siendo la duena del resto.
 requestsRouter.patch('/:externalId', async (request, response) => {
   const filter = { externalId: request.params.externalId, deletedLocally: false, ...request.scope }
-  const current = await Request.findOne(filter).select('localStatus').lean()
+  const current = await Request.findOne(filter)
+    .select('localStatus approvalTokenUsedAt approvalSentTo')
+    .lean()
   if (!current) return response.status(404).json({ error: 'Solicitud no encontrada.' })
 
   const update = {}
@@ -309,6 +358,9 @@ requestsRouter.patch('/:externalId', async (request, response) => {
     update.localStatus = request.body.localStatus
     // Quien decide y por donde queda registrado para la auditoria.
     if (request.body.localStatus !== current.localStatus) {
+      if (current.approvalSentTo) {
+        return response.status(409).json({ error: 'Decide esta solicitud desde la bandeja de aprobaciones o el correo.' })
+      }
       const now = new Date()
       update.approvalDecidedAt = now
       update.approvalDecidedBy = request.user.email
@@ -319,7 +371,7 @@ requestsRouter.patch('/:externalId', async (request, response) => {
         by: request.user.email,
         via: 'dashboard',
         at: now,
-        note: 'Cambio manual desde el panel.',
+        note: String(request.body.note ?? 'Decisión desde el panel.').slice(0, 5000),
       }
     }
   }
@@ -333,10 +385,55 @@ requestsRouter.patch('/:externalId', async (request, response) => {
   const mutation = { $set: update }
   if (push.approvalHistory) mutation.$push = push
 
-  const updated = await Request.findOneAndUpdate(filter, mutation, {
+  const updateFilter = { ...filter }
+  if (push.approvalHistory) updateFilter.localStatus = current.localStatus
+  const updated = await Request.findOneAndUpdate(updateFilter, mutation, {
     returnDocument: 'after',
   }).select(LIST_PROJECTION)
-  if (!updated) return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  if (!updated) {
+    return response.status(push.approvalHistory ? 409 : 404).json({
+      error: push.approvalHistory ? 'La solicitud ya fue decidida.' : 'Solicitud no encontrada.',
+    })
+  }
+  response.json(updated)
+})
+
+requestsRouter.post('/:externalId/defer-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
+  const updated = await Request.findOneAndUpdate({
+    externalId: request.params.externalId,
+    deletedLocally: false,
+    localStatus: LOCAL_STATUS.PENDIENTE,
+    approvalSentTo: { $ne: null },
+    approvalDeferredBy: null,
+    ...request.scope,
+  }, {
+    $set: {
+      approvalDeferredAt: new Date(),
+      approvalDeferredBy: request.user.email,
+    },
+  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+
+  if (!updated) {
+    return response.status(404).json({ error: 'No se encontró una solicitud pendiente enviada a aprobación.' })
+  }
+  response.json(updated)
+})
+
+requestsRouter.post('/:externalId/restore-approval', requireRole(ROLES.GERENTE_GENERAL), async (request, response) => {
+  const updated = await Request.findOneAndUpdate({
+    externalId: request.params.externalId,
+    deletedLocally: false,
+    localStatus: LOCAL_STATUS.PENDIENTE,
+    approvalSentTo: { $ne: null },
+    approvalDeferredBy: request.user.email,
+    ...request.scope,
+  }, {
+    $set: { approvalDeferredAt: null, approvalDeferredBy: null },
+  }, { returnDocument: 'after' }).select(LIST_PROJECTION)
+
+  if (!updated) {
+    return response.status(404).json({ error: 'No se encontró una solicitud pospuesta por este usuario.' })
+  }
   response.json(updated)
 })
 
@@ -381,9 +478,12 @@ requestsRouter.post('/:externalId/send-approval', async (request, response) => {
   const target = await Request.findOne({
     externalId: request.params.externalId,
     deletedLocally: false,
+    localStatus: LOCAL_STATUS.PENDIENTE,
     ...request.scope,
   }).select('externalId')
-  if (!target) return response.status(404).json({ error: 'Solicitud no encontrada.' })
+  if (!target) {
+    return response.status(404).json({ error: 'Solo se pueden enviar solicitudes pendientes a aprobación.' })
+  }
 
   const issued = await issueApprovalToken(target.externalId, process.env.BREVO_EDUARDO_EMAIL)
   if (!issued) return response.status(404).json({ error: 'Solicitud no encontrada.' })
@@ -396,6 +496,7 @@ requestsRouter.post('/:externalId/send-approval', async (request, response) => {
     })
     response.json({ ...sent, expiresAt: issued.expiresAt })
   } catch (error) {
+    await invalidateApprovalToken(target.externalId, issued.token)
     console.error(`[approval-email] ${error.message}`)
     response.status(502).json({ error: error.message })
   }

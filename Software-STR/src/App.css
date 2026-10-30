@@ -1568,6 +1568,62 @@ input, textarea, select { transition: border-color .2s var(--ease), box-shadow .
   .stats-grid { grid-template-columns: 1fr; }
 }
 
+/* ---------- Bandeja de aprobaciones y facturas pospuestas ---------- */
+
+.approval-queue { display: grid; gap: 16px; }
+.approval-card {
+  min-width: 0; padding: 22px;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+}
+.approval-card-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; margin-bottom: 18px;
+}
+.approval-card-header h2 { margin: 4px 0 0; font-size: 17px; }
+.approval-card-facts {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  padding: 15px; background: #f8fafc; border: 1px solid var(--line-soft);
+  border-radius: var(--radius); margin-bottom: 17px;
+}
+.approval-card-facts div { min-width: 0; }
+.approval-card-facts span,
+.approval-card-facts strong { display: block; overflow-wrap: anywhere; }
+.approval-card-facts span { margin-bottom: 4px; color: var(--muted-soft); font-size: 11.5px; }
+.approval-card-facts strong { color: var(--ink); font-size: 13px; }
+.approval-card-items > strong { display: block; margin-bottom: 8px; font-size: 13px; }
+.approval-card-items .table-wrap { overflow-x: auto; }
+.approval-card-items .items-table { min-width: 420px; }
+.approval-note {
+  display: grid; gap: 7px; margin-top: 16px;
+  color: var(--ink); font-size: 12.5px; font-weight: 650;
+}
+.approval-note > span { color: var(--muted-soft); font-weight: 400; }
+.approval-note textarea {
+  width: 100%; padding: 10px 12px; resize: vertical;
+  border: 1px solid var(--line); border-radius: 9px;
+  color: var(--ink); font: inherit; font-weight: 400;
+}
+.approval-note textarea:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+.approval-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.approval-card-actions .button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.deferred-invoice-card > p { color: var(--muted); font-size: 13px; }
+.approval-empty {
+  display: grid; justify-items: center; gap: 10px; padding: 48px 24px;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg); text-align: center;
+}
+.approval-empty h2 { margin: 3px 0 0; font-size: 17px; }
+.approval-empty p { color: var(--muted); font-size: 13px; }
+.approval-page-error { color: var(--red); }
+
+@media (max-width: 700px) {
+  .approval-card { padding: 16px; }
+  .approval-card-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .approval-card-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .approval-card-actions .button { width: 100%; }
+}
+
 /* ============================================================
    Motivo en el aviso prioritario
    ============================================================ */

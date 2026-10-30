@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createUser,
+  decideApproval,
+  deferApproval,
   deleteUser,
   getSTRs,
   getUsers,
@@ -9,6 +11,7 @@ import {
   syncNow,
   toggleUser,
   updateLocalStatus,
+  restoreApproval,
 } from './strService'
 
 const response = (payload, status = 200) => ({
@@ -61,6 +64,9 @@ describe('servicio conectado a la API', () => {
         totalLineas: 1,
         totalCantidad: 2,
         localStatus: 'Pendiente',
+        approvalSentTo: 'general@example.com',
+        approvalDeferredAt: '2026-10-30T12:00:00.000Z',
+        approvalDeferredBy: 'general@example.com',
       }],
       pages: 1,
     }))
@@ -72,6 +78,8 @@ describe('servicio conectado a la API', () => {
       cliente: 'Cliente real',
       detalleSTR: '2 x Producto',
       estado: 'Pendiente',
+      aprobacionEnviada: true,
+      aprobacionPospuestaPor: 'general@example.com',
     })
     expect(fetch).toHaveBeenCalledWith('/api/requests?limit=200&page=1', expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer jwt-real' }),
@@ -107,6 +115,25 @@ describe('servicio conectado a la API', () => {
       '/api/users/user-1',
     ])
     expect(fetch).toHaveBeenCalledTimes(7)
+  })
+
+  it('decide, pospone y restaura aprobaciones en la API', async () => {
+    localStorage.setItem('strflow-token', 'jwt-real')
+    fetch
+      .mockResolvedValueOnce(response({ externalId: 'GT-123', localStatus: 'Aprobada' }))
+      .mockResolvedValueOnce(response({ externalId: 'GT-123', localStatus: 'Pendiente', approvalDeferredAt: '2026-10-30T12:00:00.000Z' }))
+      .mockResolvedValueOnce(response({ externalId: 'GT-123', localStatus: 'Pendiente', approvalDeferredAt: null }))
+
+    await decideApproval('GT-123', 'Aprobada', 'Stock confirmado.')
+    await deferApproval('GT-123')
+    await restoreApproval('GT-123')
+
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/requests/GT-123/decide-approval',
+      '/api/requests/GT-123/defer-approval',
+      '/api/requests/GT-123/restore-approval',
+    ])
+    expect(fetch.mock.calls[0][1].body).toBe(JSON.stringify({ status: 'Aprobada', note: 'Stock confirmado.' }))
   })
 
   it('no usa rutas protegidas si no hay sesión', async () => {

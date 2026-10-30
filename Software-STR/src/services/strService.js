@@ -91,6 +91,10 @@ function adapt(request) {
     decididoPor: request.approvalDecidedBy ?? null,
     decididoVia: request.approvalDecidedVia ?? null,
     decididoEn: request.approvalDecidedAt ?? null,
+    aprobacionEnviada: Boolean(request.approvalSentTo),
+    aprobacionEnviadaA: request.approvalSentTo ?? null,
+    aprobacionPospuestaEn: request.approvalDeferredAt ?? null,
+    aprobacionPospuestaPor: request.approvalDeferredBy ?? null,
     historial: request.approvalHistory ?? [],
     // El motivo que escribio quien decidio, en el formulario del correo.
     motivo: request.approvalHistory?.[request.approvalHistory.length - 1]?.note ?? '',
@@ -136,12 +140,37 @@ export async function sendApprovalEmail(str, additionalInfo) {
 }
 
 // Cambio de estado local (no toca nada de lo que manda la API externa).
-export async function updateLocalStatus(id, localStatus, internalNotes) {
+export async function updateLocalStatus(id, localStatus, internalNotes, note) {
   const body = { localStatus }
   if (internalNotes !== undefined) body.internalNotes = internalNotes
+  if (note !== undefined) body.note = note
   const updated = await authFetch(`/api/requests/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
+  })
+  return adapt(updated)
+}
+
+export async function decideApproval(id, status, note) {
+  const updated = await authFetch(`/api/requests/${encodeURIComponent(id)}/decide-approval`, {
+    method: 'POST',
+    body: JSON.stringify({ status, note }),
+  })
+  return adapt(updated)
+}
+
+export async function deferApproval(id) {
+  const updated = await authFetch(`/api/requests/${encodeURIComponent(id)}/defer-approval`, {
+    method: 'POST',
+    body: '{}',
+  })
+  return adapt(updated)
+}
+
+export async function restoreApproval(id) {
+  const updated = await authFetch(`/api/requests/${encodeURIComponent(id)}/restore-approval`, {
+    method: 'POST',
+    body: '{}',
   })
   return adapt(updated)
 }
